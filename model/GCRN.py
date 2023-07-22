@@ -3,6 +3,7 @@ import torch.nn.functional as F
 import torch.nn as nn
 import math
 import numpy as np
+from utils import load_pickle, sym_adj
 
 class AGCN(nn.Module):
     def __init__(self, dim_in, dim_out, cheb_k):
@@ -115,7 +116,8 @@ class ADCRNN_Decoder(nn.Module):
 class GCRN(nn.Module):
     def __init__(self, num_nodes, input_dim, output_dim, horizon, rnn_units, num_layers=1, embed_dim=8, 
                  cheb_k=3, ycov_dim=1, cl_decay_steps=2000, use_curriculum_learning=True, fn_t=12, temp=0.1, 
-                 top_k=10, input_masking_ratio=0.01, fusion_num=1, schema=1, device="cpu"):
+                 top_k=10, input_masking_ratio=0.01, fusion_num=1, schema=1, adj_path="", 
+                 connect=False, contrastive_denominator=False, device="cpu"):
         super(GCRN, self).__init__()
         self.num_nodes = num_nodes
         self.input_dim = input_dim
@@ -138,9 +140,19 @@ class GCRN(nn.Module):
         self.im_t = input_masking_ratio
         self.fusion_num = fusion_num
         self.schema = schema
+        self.adj_path = adj_path
+        self.connect = connect
+        self.contrastive_denominator = contrastive_denominator
         
         # graph
-        self.node_embeddings = nn.Parameter(torch.randn(self.num_nodes, self.embed_dim), requires_grad=True)
+        if len(self.adj_path) > 0:  #* provided adj matrix
+            _, _, adj_mx = load_pickle(self.adj_path)
+            adj_mx = np.maximum.reduce([adj_mx, adj_mx.T])  # convert asym adj into sym adj
+            if self.connect:  # 0/1 adj matrix
+                adj_mx[adj_mx > 0] = 1.
+            self.adj = torch.FloatTensor(sym_adj(adj_mx)).to(self.device)
+        else:
+            self.node_embeddings = nn.Parameter(torch.randn(self.num_nodes, self.embed_dim), requires_grad=True)
         
         # encoder
         self.encoder = ADCRNN_Encoder(self.num_nodes, self.input_dim, self.rnn_units, self.cheb_k, self.num_layers)
@@ -240,7 +252,7 @@ class GCRN(nn.Module):
         spatial_norm = rep.norm(dim=2).unsqueeze(dim=2)
         spatial_norm_aug = rep_aug.norm(dim=2).unsqueeze(dim=2)
         spatial_matrix = torch.matmul(rep, rep_aug.transpose(1,2)) / torch.matmul(spatial_norm, spatial_norm_aug.transpose(1,2))
-        spatial_matrix = torch.exp(spatial_matrix / self.temp)
+        spatial_matrix = torch.exp(spatial_matrix / self.temp)  # (bs, node, node)
         
         diag = torch.eye(self.num_nodes, dtype=torch.bool).to(self.device)
         pos_sum = torch.sum(spatial_matrix * diag, dim=2) # (bs, node)
@@ -254,7 +266,10 @@ class GCRN(nn.Module):
             spatial_matrix = spatial_matrix * adj
         spatial_neg = torch.sum(spatial_matrix, dim=2) # (bs, node)
 
-        ratio = pos_sum / (spatial_neg + tempo_neg.transpose(0,1) - pos_sum)
+        if not self.contrastive_denominator:
+            ratio = pos_sum / (spatial_neg + tempo_neg.transpose(0,1) - pos_sum)
+        else:
+         ratio = pos_sum / (spatial_neg + tempo_neg.transpose(0,1))
         # ratio = pos_sum / tempo_neg.transpose(0,1)  #* no spatial_neg is not better than with spatial_neg
         u_loss = torch.mean(-torch.log(ratio))
         return u_loss    
@@ -265,7 +280,10 @@ class GCRN(nn.Module):
         return eps.mul(std).add_(mu) # return z sample
     
     def forward(self, x, x_cov, y_cov, labels=None, batches_seen=None):
-        support = F.softmax(F.relu(torch.mm(self.node_embeddings, self.node_embeddings.transpose(0, 1))), dim=1)
+        if len(self.adj_path) == 0:
+            support = F.softmax(F.relu(torch.mm(self.node_embeddings, self.node_embeddings.transpose(0, 1))), dim=1)
+        else:
+            support = self.adj
         init_state = self.encoder.init_hidden(x.shape[0])
         h_en, state_en = self.encoder(x, init_state, support) # B, T, N, hidden      
         h_t = h_en[:, -1, :, :]   # B, N, hidden (last state)        
@@ -312,7 +330,7 @@ class GCRN(nn.Module):
         output = torch.stack(out, dim=1)
         
         # TODo self-supervised contrastive learning
-        if labels is not None:
+        if labels is not None and self.schema in [1, 2, 3, 4]:
             u_loss = self.get_unsupervised_loss(x_cov, h_t, h_t_aug, support)
             return output, u_loss
         return output, None

@@ -6,6 +6,7 @@ An implementation of CL-Traff under GCRN backbone.
 * pytorch 1.9.1 -> py3.8_cuda11.1_cudnn8.0.5_0
 * pandas 1.2.4 
 * numpy 1.20.1
+* tensorboard 2.12.1 -> conda install tensorboard
 * torch-summary 1.4.5 -> pip install torch-summary https://pypi.org/project/torch-summary/ (must necessary)
 * jpholiday -> pip install jpholiday (not must, but if you want onehottime)
 

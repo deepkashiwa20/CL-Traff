@@ -17,6 +17,7 @@ import logging
 from metrics import evaluate
 from utils import masked_mae, masked_mae_loss, StandardScaler, getDayTimestamp
 from GCRN import GCRN
+from torch.utils.tensorboard import SummaryWriter 
 
 def get_xs_ys(data, mode):
     train_num = int(data.shape[0] * args.trainval_ratio)
@@ -72,7 +73,9 @@ def get_model(mode):
                     rnn_units=args.rnn_units, num_layers=args.num_rnn_layers, cheb_k = args.max_diffusion_step,
                     cl_decay_steps=args.cl_decay_steps, use_curriculum_learning=args.use_curriculum_learning,
                     fn_t=args.fn_t, temp=args.temp, top_k=args.top_k, input_masking_ratio=args.im_t, fusion_num=args.fusion_num, 
-                    schema=args.schema, device=device).to(device)
+                    schema=args.schema, adj_path=args.adj_path, connect=args.connect, 
+                    contrastive_denominator=args.contrastive_denominator,
+                    device=device).to(device)
     if mode == 'train':
         summary(model, [(args.seq_len, args.num_nodes, args.input_dim), (args.seq_len, args.num_nodes, args.input_dim), (args.horizon, args.num_nodes, args.output_dim)], device=device)   
         print_params(model)
@@ -121,24 +124,30 @@ def train_model(name, mode, xs, ys, xcov, ycov):
     batches_seen = 0
     for epoch in range(args.epochs):
         starttime = datetime.now()     
-        loss_sum, n = 0.0, 0
-        loss_sum1, loss_sum2, loss_sum3 = 0.0, 0.0, 0.0
+        loss_sum, mae_loss_sum, contrastive_loss_sum, n = 0.0, 0.0, 0.0, 0
         model.train()
         for x, y, xcov, ycov in train_iter:
             optimizer.zero_grad()
             y_pred, u_loss = model(x, xcov, ycov, y, batches_seen)
             y_pred = scaler.inverse_transform(y_pred)
             loss = criterion(y_pred, y) 
+            mae_loss_sum += loss.item() * y.shape[0]
             # TODo self-supervised contrastive loss
-            loss = loss + args.lam * u_loss
+            if u_loss is None:
+                u_loss = torch.zeros_like(loss)
+            loss = loss + args.lam * u_loss 
             
             loss_sum += loss.item() * y.shape[0]
+            contrastive_loss_sum += u_loss.item() * y.shape[0]
             n += y.shape[0]
             batches_seen += 1
             loss.backward()
             optimizer.step()
         lr_scheduler.step()    
         train_loss = loss_sum / n
+        mae_loss = mae_loss_sum / n
+        contrastive_loss = contrastive_loss_sum / n
+        
         val_loss, _ = evaluate_model(model, val_iter)
         if val_loss < min_val_loss:
             wait = 0
@@ -153,8 +162,14 @@ def train_model(name, mode, xs, ys, xcov, ycov):
         epoch_time = (endtime - starttime).seconds
         logger.info("epoch", epoch, "time used:", epoch_time, "seconds", 
                     "train loss:", '%.6f' % train_loss, 
+                    "mae loss:", '%.6f' % mae_loss,
+                    "contrastive loss:", '%.6f' % contrastive_loss,
                     "validation loss:", '%.6f' % val_loss, 
                     "lr:", '%.6f' % optimizer.param_groups[0]['lr'])
+        writer.add_scalar('train loss', train_loss, epoch)
+        writer.add_scalar('mae loss', mae_loss, epoch)
+        writer.add_scalar('contrastive loss', contrastive_loss, epoch)
+        writer.add_scalar('validation loss', val_loss, epoch)
         with open(epochlog_path, 'a') as f:
             f.write("%s, %d, %s, %d, %s, %s, %.6f, %s, %.6f\n" % ("epoch", epoch, "time used", epoch_time, "seconds", "train loss", train_loss, "validation loss:", val_loss))
     
@@ -172,6 +187,7 @@ def test_model(name, mode, xs, ys, xcov, ycov):
     # np.save(path + f'/{name}_prediction.npy', ys_pred)
     # np.save(path + f'/{name}_groundtruth.npy', ys)
     MSE, RMSE, MAE, MAPE = evaluate(ys, ys_pred)
+    PREFIX = "test"
     logger.info("%s, %s, test loss, %.6f" % (name, mode, loss))
     logger.info("all pred steps, %s, %s, MSE, RMSE, MAE, MAPE, %.6f, %.6f, %.6f, %.6f" % (name, mode, MSE, RMSE, MAE, MAPE))
     with open(score_path, 'a') as f:
@@ -179,6 +195,10 @@ def test_model(name, mode, xs, ys, xcov, ycov):
         for i in range(args.horizon):
             MSE, RMSE, MAE, MAPE = evaluate(ys[:, i, :], ys_pred[:, i, :])
             logger.info("%d step, %s, %s, MSE, RMSE, MAE, MAPE, %.6f, %.6f, %.6f, %.6f" % (i+1, name, mode, MSE, RMSE, MAE, MAPE))
+            writer.add_scalar(PREFIX + '_MSE', MSE, i+1)
+            writer.add_scalar(PREFIX + '_RMSE', MSE, i+1)
+            writer.add_scalar(PREFIX + '_MAE', MSE, i+1)
+            writer.add_scalar(PREFIX + '_MAPE', MSE, i+1)
             f.write("%d step, %s, %s, MSE, RMSE, MAE, MAPE, %.6f, %.6f, %.6f, %.6f\n" % (i+1, name, mode, MSE, RMSE, MAE, MAPE))
         
 #########################################################################################    
@@ -207,22 +227,28 @@ parser.add_argument("--cl_decay_steps", type=int, default=2000, help="cl_decay_s
 parser.add_argument('--gpu', type=int, default=0, help='which gpu to use')
 # parser.add_argument('--seed', type=int, default=100, help='random seed.')
 # ToDo: support contrastive learning
-parser.add_argument('--temp', type=float, default=0.5, help='temperature parameter')
+parser.add_argument('--temp', type=float, default=0.1, help='temperature parameter')
 parser.add_argument('--lam', type=float, default=0.05, help='loss lambda') 
 parser.add_argument('--fn_t', type=int, default=12, help='filter negatives threshold, 12 means 1 hour')
 parser.add_argument('--top_k', type=int, default=10, help='graph neighbors threshold, 10 means top 10 nodes')
 parser.add_argument('--fusion_num', type=int, default=2, help='layer num of fusion layer')
 parser.add_argument('--im_t', type=int, default=0.01, help='input masking ratio')
-parser.add_argument('--schema', type=int, default=1, choices=[1, 2, 3, 4], help='which contrastive backbone schema to use')
+parser.add_argument('--schema', type=int, default=1, choices=[0, 1, 2, 3, 4], help='which contrastive backbone schema to use (0 is no contrast)')
+parser.add_argument('--adj_path', type=str, default="" , help='adj matrix path')
+parser.add_argument('--connect', type=bool, default=False , help='which adj matrix (distance or 0/1) to use')
+parser.add_argument('--contrastive_denominator', type=bool, default=False , help='whether to contain pos_score in the denominator of contrastive loss')
+parser.add_argument('--adaptive', type=bool, default=True , help='whether to use original adaptive matirx')
 
 args = parser.parse_args()
 
 if args.dataset == 'METRLA':
     data_path = f'../{args.dataset}/metr-la.h5'
     args.num_nodes = 207
+    args.adj_path = f'../{args.dataset}/adj_mx.pkl' if not args.adaptive else ""
 elif args.dataset == 'PEMSBAY':
     data_path = f'../{args.dataset}/pems-bay.h5'
     args.num_nodes = 325
+    args.adj_path = f'../{args.dataset}/adj_mx_bay.pkl' if not args.adaptive else ""
 else:
     pass # including more datasets in the future    
 
@@ -240,6 +266,8 @@ shutil.copy2(f'{model_name}.py', path)
 shutil.copy2('utils.py', path)
 shutil.copy2('metrics.py', path)
     
+writer = SummaryWriter(path)  # use tensorboard to record summary
+
 logger = logging.getLogger(__name__)
 logger.setLevel(level = logging.INFO)
 class MyFormatter(logging.Formatter):
@@ -287,6 +315,10 @@ logger.info('top_k', args.top_k)
 logger.info('fusion_num', args.fusion_num)
 logger.info('input_masking_ratio', args.im_t)
 logger.info('backbone_schema', args.schema)
+logger.info('adj_path', args.adj_path)
+logger.info('connect', args.connect)
+logger.info('contrastive_denominator', args.contrastive_denominator)
+logger.info('adaptive', args.adaptive)
 
 
 cpu_num = 1
