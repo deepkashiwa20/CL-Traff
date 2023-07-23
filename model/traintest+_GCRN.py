@@ -235,9 +235,9 @@ parser.add_argument('--fusion_num', type=int, default=2, help='layer num of fusi
 parser.add_argument('--im_t', type=int, default=0.01, help='input masking ratio')
 parser.add_argument('--schema', type=int, default=1, choices=[0, 1, 2, 3, 4], help='which contrastive backbone schema to use (0 is no contrast)')
 parser.add_argument('--adj_path', type=str, default="" , help='adj matrix path')
-parser.add_argument('--connect', type=bool, default=False , help='which adj matrix (distance or 0/1) to use')
-parser.add_argument('--contrastive_denominator', type=bool, default=False , help='whether to contain pos_score in the denominator of contrastive loss')
-parser.add_argument('--adaptive', type=bool, default=True , help='whether to use original adaptive matirx')
+parser.add_argument('--connect', action="store_true", help='which adj matrix (distance or 0/1) to use')
+parser.add_argument('--contrastive_denominator', action="store_true", help='whether to contain pos_score in the denominator of contrastive loss')
+parser.add_argument('--adaptive', action="store_true", help='whether to use original adaptive matirx')
 
 args = parser.parse_args()
 
