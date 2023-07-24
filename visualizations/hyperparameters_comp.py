@@ -14,7 +14,7 @@ TEMP_RANGE = [0, 0.1, 0.3, 0.5, 0.7, 1.0]
 
 TOPK_RANGE = [0, 1, 2, 5, 10, 20]
 
-ORIGINAL_METRICS = np.array([[[5.55, 2.86, 7.55], [6.57, 3.25, 8.99], [7.56, 3.68, 10.46]]])
+ORIGINAL_METRICS = np.array([[[5.55, 2.86, 7.55], [6.57, 3.25, 8.99], [7.56, 3.68, 10.46]]]) #* Baseline
 
 SCHEMA_3_FUSION1_METRICS = np.array([[[5.43, 2.84, 7.63], [6.72, 3.35, 9.59], [8.55, 4.22, 12.76]]])  # 1 layer fusion is worse
 
@@ -27,6 +27,16 @@ SCHEMA_4_X_AUG_METRICS = np.array([[[5.35, 2.80, 7.25], [6.46, 3.23, 8.88], [7.7
 SCHEMA2_METRICS = np.array([[[5.28, 2.75, 7.14], [6.42, 3.18, 8.87], [7.77, 3.75, 11.12]]])  # temp=0.5 is not better than schema 1 
 
 SCHEMA2_METRICS = np.array([[[5.31, 2.77, 7.18], [6.46, 3.22, 8.85], [7.83, 3.82, 11.12]]])  # temp=0.1 is not better than schema 1 
+
+SCHEMA0_CONNECT_METRICS = np.array([[[5.46, 2.83, 7.52], [6.64, 3.27, 9.25], [7.95, 3.84, 11.46]]])  # connect and distance matrix is worse than adaptive matrix
+SCHEMA0_DISTANCE_METRICS = np.array([[[5.50, 2.85, 7.45], [6.70, 3.31, 9.19], [8.11, 3.96, 11.59]]])
+
+SCHEMA1_CONNECT_METRICS = np.array([[[5.59, 2.89, 7.64], [6.80, 3.38, 9.48], [8.27, 4.07, 12.05]]])
+SCHEMA1_DISTANCE_METRICS = np.array([[[5.56, 2.88, 7.70], [6.77, 3.38, 9.62], [8.24, 4.06, 12.29]]])
+
+SCHEMA1_CONNECT_DENOMINATOR_METRICS = np.array([[[5.56, 2.86, 7.53], [6.71, 3.33, 9.25], [8.04, 3.95, 11.58]]])
+SCHEMA1_DISTANCE_DENOMINATOR_METRICS = np.array([[[5.49, 2.85, 7.56], [6.67, 3.31, 9.34], [8.06, 3.96, 11.83]]])
+SCHEMA1_ADAPTIVE_DENOMINATOR_METRICS = np.array([[[5.31, 2.78, 7.20], [6.43, 3.22, 8.89], [7.75, 3.81, 11.21]]])  # whether constrative denominators is less impact
 
 # 6.187012, 3.378840, 8.599727 7.720099, 4.039131, 10.803047, 9.867319, 5.175108, 14.482716 learning_rate=0.03 is worse
 # 
