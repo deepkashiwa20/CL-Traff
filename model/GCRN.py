@@ -114,8 +114,8 @@ class GCRNN_Decoder(nn.Module):
 
 class GCRN(nn.Module):
     def __init__(self, num_nodes, input_dim, output_dim, horizon, rnn_units, num_layers=1, embed_dim=8, cheb_k=3, ycov_dim=1, cl_decay_steps=2000, 
-                 use_curriculum_learning=True, fn_t=12, temp=0.1, top_k=10, input_masking_ratio=0.01, fusion_num=1, schema=1, adj_path="", 
-                 connect=False, contrastive_denominator=False, device="cpu"):
+                 use_curriculum_learning=True, fn_t=12, temp=0.1, top_k=10, input_masking_ratio=0.01, fusion_num=1, schema=1,  
+                 contrastive_denominator=False, device="cpu"):
         super(GCRN, self).__init__()
         self.num_nodes = num_nodes
         self.input_dim = input_dim
@@ -138,19 +138,10 @@ class GCRN(nn.Module):
         self.im_t = input_masking_ratio
         self.fusion_num = fusion_num
         self.schema = schema
-        self.adj_path = adj_path
-        self.connect = connect
         self.contrastive_denominator = contrastive_denominator
         
-        # TODO: support adaptive or pre-defined graph
-        if len(self.adj_path) > 0:  #* provided adj matrix
-            _, _, adj_mx = load_pickle(self.adj_path)
-            adj_mx = np.maximum.reduce([adj_mx, adj_mx.T])  # convert asym adj into sym adj
-            if self.connect:  # 0/1 adj matrix
-                adj_mx[adj_mx > 0] = 1.
-            self.adj = torch.FloatTensor(sym_adj(adj_mx)).to(self.device)
-        else:
-            self.node_embeddings = nn.Parameter(torch.randn(self.num_nodes, self.embed_dim), requires_grad=True)
+        # graph
+        self.node_embeddings = nn.Parameter(torch.randn(self.num_nodes, self.embed_dim), requires_grad=True)
         
         # encoder
         self.encoder = GCRNN_Encoder(self.num_nodes, self.input_dim, self.rnn_units, self.cheb_k, self.num_layers)
@@ -277,11 +268,7 @@ class GCRN(nn.Module):
         return eps.mul(std).add_(mu) # return z sample
     
     def forward(self, x, x_cov, y_cov, labels=None, batches_seen=None):
-        # TODO: support adaptive or pre-defined graph
-        if len(self.adj_path) == 0:
-            support = F.softmax(F.relu(torch.mm(self.node_embeddings, self.node_embeddings.transpose(0, 1))), dim=1)
-        else:
-            support = self.adj
+        support = F.softmax(F.relu(torch.mm(self.node_embeddings, self.node_embeddings.transpose(0, 1))), dim=1)
         
         init_state = self.encoder.init_hidden(x.shape[0])
         h_en, state_en = self.encoder(x, init_state, support) # B, T, N, hidden      

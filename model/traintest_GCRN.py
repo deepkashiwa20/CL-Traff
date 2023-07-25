@@ -30,9 +30,8 @@ def get_model():
                  rnn_units=args.rnn_units, num_layers=args.num_rnn_layers, embed_dim=args.embed_dim, cheb_k = args.max_diffusion_step, 
                  cl_decay_steps=args.cl_decay_steps, use_curriculum_learning=args.use_curriculum_learning, fn_t=args.fn_t, 
                  temp=args.temp, top_k=args.top_k, input_masking_ratio=args.im_t, fusion_num=args.fusion_num, 
-                 schema=args.schema, adj_path=args.adj_path, connect=args.connect, contrastive_denominator=args.contrastive_denominator,
-                 device=device).to(device)  # TODo: add new parameters here
-    return model
+                 schema=args.schema, contrastive_denominator=args.contrastive_denominator, device=device).to(device)  # TODo: add new parameters here
+    return model 
 
 def prepare_x_y(x, y):
     """
@@ -190,21 +189,17 @@ parser.add_argument('--fn_t', type=int, default=12, help='filter negatives thres
 parser.add_argument('--top_k', type=int, default=10, help='graph neighbors threshold, 10 means top 10 nodes')
 parser.add_argument('--fusion_num', type=int, default=2, help='layer num of fusion layer')
 parser.add_argument('--im_t', type=int, default=0.01, help='input masking ratio')
-parser.add_argument('--schema', type=int, default=3, choices=[0, 1, 2, 3, 4], help='which contrastive backbone schema to use (0 is no contrast)')
-parser.add_argument('--adj_path', type=str, default="" , help='adj matrix path')
-parser.add_argument('--connect', action="store_true", help='which adj matrix (distance or 0/1) to use')
+parser.add_argument('--schema', type=int, default=0, choices=[0, 1, 2, 3, 4], help='which contrastive backbone schema to use (0 is no contrast, i.e., baseline)')
 parser.add_argument('--contrastive_denominator', action="store_true", help='whether to contain pos_score in the denominator of contrastive loss')
-parser.add_argument('--adaptive', action="store_true", help='whether to use original adaptive matirx')
+
 args = parser.parse_args()
         
 if args.dataset == 'METRLA':
     data_path = f'../{args.dataset}/metr-la.h5'
     args.num_nodes = 207
-    args.adj_path = f'../{args.dataset}/adj_mx.pkl' if not args.adaptive else ""  # TODO: support pre-defined adj matrix
 elif args.dataset == 'PEMSBAY':
     data_path = f'../{args.dataset}/pems-bay.h5'
     args.num_nodes = 325
-    args.adj_path = f'../{args.dataset}/adj_mx_bay.pkl' if not args.adaptive else ""
 else:
     pass # including more datasets in the future    
 
@@ -270,10 +265,7 @@ logger.info('top_k', args.top_k)
 logger.info('fusion_num', args.fusion_num)
 logger.info('input_masking_ratio', args.im_t)
 logger.info('backbone_schema', args.schema)
-logger.info('adj_path', args.adj_path)
-logger.info('connect', args.connect)
 logger.info('contrastive_denominator', args.contrastive_denominator)
-logger.info('adaptive', args.adaptive)
 
 cpu_num = 1
 os.environ ['OMP_NUM_THREADS'] = str(cpu_num)
