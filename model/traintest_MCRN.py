@@ -12,8 +12,8 @@ from torchsummary import summary
 import argparse
 import logging
 from utils import StandardScaler, DataLoader, masked_mae_loss, masked_mape_loss, masked_mse_loss, masked_rmse_loss
-from GCRN import GCRN
-from torch.utils.tensorboard import SummaryWriter 
+from utils import load_adj
+from MCRN import MCRN
 
 def print_model(model):
     param_count = 0
@@ -25,13 +25,16 @@ def print_model(model):
     logger.info(f'In total: {param_count} trainable parameters.')
     return
 
-def get_model():  
-    model = GCRN(num_nodes=args.num_nodes, input_dim=args.input_dim, output_dim=args.output_dim, horizon=args.horizon, 
-                 rnn_units=args.rnn_units, num_layers=args.num_rnn_layers, embed_dim=args.embed_dim, cheb_k = args.max_diffusion_step, 
-                 cl_decay_steps=args.cl_decay_steps, use_curriculum_learning=args.use_curriculum_learning, fn_t=args.fn_t, 
-                 temp=args.temp, top_k=args.top_k, input_masking_ratio=args.im_t, fusion_num=args.fusion_num, 
-                 schema=args.schema, adj_path=args.adj_path, connect=args.connect, contrastive_denominator=args.contrastive_denominator,
-                 device=device).to(device)  # TODo: add new parameters here
+def get_model():
+    if args.adj_mx:
+        adj_mx = load_adj(adj_mx_path, 'doubletransition')
+        adjs = [torch.tensor(i).to(device) for i in adj_mx]
+    else:
+        adjs = None
+    model = MCRN(num_nodes=args.num_nodes, input_dim=args.input_dim, output_dim=args.output_dim, horizon=args.horizon, 
+                 rnn_units=args.rnn_units, num_layers=args.num_rnn_layers, embed_dim=args.embed_dim, 
+                 cheb_k = args.max_diffusion_step, adj_mx=adjs, adp_mx=args.adp_mx, cl_decay_steps=args.cl_decay_steps, 
+                 use_curriculum_learning=args.use_curriculum_learning).to(device)
     return model
 
 def prepare_x_y(x, y):
@@ -44,14 +47,12 @@ def prepare_x_y(x, y):
               y: shape (horizon, batch_size, num_sensor * output_dim)
     """
     x0 = x[..., :args.input_dim]
-    x1 = x[..., args.output_dim:]
     y0 = y[..., :args.output_dim]
     y1 = y[..., args.output_dim:]
     x0 = torch.from_numpy(x0).float()
-    x1 = torch.from_numpy(x1).float()
     y0 = torch.from_numpy(y0).float()
     y1 = torch.from_numpy(y1).float()
-    return x0.to(device), x1.to(device), y0.to(device), y1.to(device)  # x, x_cov, y, y_cov
+    return x0.to(device), y0.to(device), y1.to(device) # x, y, y_cov
 
 def evaluate(model, mode):
     with torch.no_grad():
@@ -59,8 +60,8 @@ def evaluate(model, mode):
         data_iter =  data[f'{mode}_loader'].get_iterator()
         ys_true, ys_pred = [], []
         for x, y in data_iter:
-            x, xcov, y, ycov = prepare_x_y(x, y)
-            output, _ = model(x, xcov, ycov)  # TODO: add new parameters <xcov> here 
+            x, y, ycov = prepare_x_y(x, y)
+            output = model(x, ycov)
             y_pred = scaler.inverse_transform(output)
             y_true = scaler.inverse_transform(y)
             ys_true.append(y_true)
@@ -88,7 +89,7 @@ def evaluate(model, mode):
             logger.info('Horizon 30mins: mae: {:.4f}, mape: {:.4f}, rmse: {:.4f}'.format(mae_6, mape_6 * 100, rmse_6))
             logger.info('Horizon 60mins: mae: {:.4f}, mape: {:.4f}, rmse: {:.4f}'.format(mae_12, mape_12 * 100, rmse_12))
             ys_true, ys_pred = ys_true.permute(1, 0, 2, 3), ys_pred.permute(1, 0, 2, 3)
-        
+            
         return loss, ys_true, ys_pred
 
     
@@ -104,41 +105,29 @@ def traintest_model():
         start_time = time.time()
         model = model.train()
         data_iter = data['train_loader'].get_iterator()
-        losses, mae_losses, contrastive_losses = [], [], []  # TODO: record new losses here
+        losses = []
         for x, y in data_iter:
             optimizer.zero_grad()
-            x, xcov, y, ycov = prepare_x_y(x, y) # TODO: modify outputs
-            output, u_loss = model(x, xcov, ycov, y, batches_seen) # TODO: add new parameters <xcov> here
+            x, y, ycov = prepare_x_y(x, y)
+            output = model(x, ycov, y, batches_seen)
             y_pred = scaler.inverse_transform(output)
             y_true = scaler.inverse_transform(y)
-            mae_loss = masked_mae_loss(y_pred, y_true) # masked_mae_loss(y_pred, y_true)
-            # TODO: add self-supervised contrastive loss
-            if u_loss is None:
-                u_loss = torch.zeros_like(mae_loss)
-            loss = mae_loss + args.lam * u_loss 
+            loss = masked_mae_loss(y_pred, y_true) # masked_mae_loss(y_pred, y_true)
             losses.append(loss.item())
-            mae_losses.append(mae_loss.item())
-            contrastive_losses.append(u_loss.item())
             batches_seen += 1
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm) # gradient clipping - this does it in place
             optimizer.step()
         train_loss = np.mean(losses)
-        train_mae_loss = np.mean(mae_losses)  # TODO: record new loss
-        train_contrastive_loss = np.mean(contrastive_losses)
         lr_scheduler.step()
         val_loss, _, _ = evaluate(model, 'val')
+        # if (epoch_num % args.test_every_n_epochs) == args.test_every_n_epochs - 1:
         end_time2 = time.time()
-        message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, train_mae_loss: {:.4f}, train_contrastive_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.1f}s'.format(epoch_num + 1, 
-                   args.epochs, batches_seen, train_loss, train_mae_loss, train_contrastive_loss, val_loss, optimizer.param_groups[0]['lr'], (end_time2 - start_time))
+        message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.1f}s'.format(epoch_num + 1, 
+                   args.epochs, batches_seen, train_loss, val_loss, optimizer.param_groups[0]['lr'], (end_time2 - start_time))
         logger.info(message)
-        # TODO: record loss curve
-        writer.add_scalar('train loss', train_loss, epoch_num + 1)
-        writer.add_scalar('mae loss', train_mae_loss, epoch_num + 1)
-        writer.add_scalar('contrastive loss', train_contrastive_loss, epoch_num + 1)
-        writer.add_scalar('validation loss', val_loss, epoch_num + 1)
-        test_loss, _, _ = evaluate(model, 'test')
-        writer.add_scalar('test loss', test_loss, epoch_num + 1)
+
+        test_loss, ys_true, ys_pred = evaluate(model, 'test')
 
         if val_loss < min_val_loss:
             wait = 0
@@ -180,47 +169,37 @@ parser.add_argument("--lr_decay_ratio", type=float, default=0.1, help="lr_decay_
 parser.add_argument("--epsilon", type=float, default=1e-3, help="optimizer epsilon")
 parser.add_argument("--max_grad_norm", type=int, default=5, help="max_grad_norm")
 parser.add_argument("--use_curriculum_learning", type=eval, choices=[True, False], default='True', help="use_curriculum_learning")
+parser.add_argument("--adp_mx", type=eval, choices=[True, False], default='True', help="use adaptive mx")
+parser.add_argument("--adj_mx", type=eval, choices=[True, False], default='False', help="use predefined adj_mx")
 parser.add_argument("--cl_decay_steps", type=int, default=2000, help="cl_decay_steps")
+parser.add_argument('--test_every_n_epochs', type=int, default=5, help='test_every_n_epochs')
 parser.add_argument('--gpu', type=int, default=0, help='which gpu to use')
 # parser.add_argument('--seed', type=int, default=100, help='random seed.')
-# TODO: support contrastive learning
-parser.add_argument('--temp', type=float, default=0.1, help='temperature parameter')
-parser.add_argument('--lam', type=float, default=0.05, help='loss lambda') 
-parser.add_argument('--fn_t', type=int, default=12, help='filter negatives threshold, 12 means 1 hour')
-parser.add_argument('--top_k', type=int, default=10, help='graph neighbors threshold, 10 means top 10 nodes')
-parser.add_argument('--fusion_num', type=int, default=2, help='layer num of fusion layer')
-parser.add_argument('--im_t', type=int, default=0.01, help='input masking ratio')
-parser.add_argument('--schema', type=int, default=3, choices=[0, 1, 2, 3, 4], help='which contrastive backbone schema to use (0 is no contrast)')
-parser.add_argument('--adj_path', type=str, default="" , help='adj matrix path')
-parser.add_argument('--connect', action="store_true", help='which adj matrix (distance or 0/1) to use')
-parser.add_argument('--contrastive_denominator', action="store_true", help='whether to contain pos_score in the denominator of contrastive loss')
-parser.add_argument('--adaptive', action="store_true", help='whether to use original adaptive matirx')
 args = parser.parse_args()
         
 if args.dataset == 'METRLA':
     data_path = f'../{args.dataset}/metr-la.h5'
+    adj_mx_path = f'../{args.dataset}/adj_mx.pkl'
     args.num_nodes = 207
-    args.adj_path = f'../{args.dataset}/adj_mx.pkl' if not args.adaptive else ""  # TODO: support pre-defined adj matrix
 elif args.dataset == 'PEMSBAY':
     data_path = f'../{args.dataset}/pems-bay.h5'
+    adj_mx_path = f'../{args.dataset}/adj_mx_bay.pkl'
     args.num_nodes = 325
-    args.adj_path = f'../{args.dataset}/adj_mx_bay.pkl' if not args.adaptive else ""
 else:
     pass # including more datasets in the future    
 
-model_name = 'GCRN'
+model_name = 'MCRN'
 timestring = time.strftime('%Y%m%d%H%M%S', time.localtime())
 path = f'../save/{args.dataset}_{model_name}_{timestring}'
 logging_path = f'{path}/{model_name}_{timestring}_logging.txt'
-# score_path = f'{path}/{model_name}_{timestring}_scores.txt'
-# epochlog_path = f'{path}/{model_name}_{timestring}_epochlog.txt'
+score_path = f'{path}/{model_name}_{timestring}_scores.txt'
+epochlog_path = f'{path}/{model_name}_{timestring}_epochlog.txt'
 modelpt_path = f'{path}/{model_name}_{timestring}.pt'
 if not os.path.exists(path): os.makedirs(path)
 shutil.copy2(sys.argv[0], path)
 shutil.copy2(f'{model_name}.py', path)
 shutil.copy2('utils.py', path)
     
-writer = SummaryWriter(path)  # TODO: use tensorboard to record summary
 logger = logging.getLogger(__name__)
 logger.setLevel(level = logging.INFO)
 class MyFormatter(logging.Formatter):
@@ -252,6 +231,8 @@ logger.info('embed_dim', args.embed_dim)
 logger.info('num_rnn_layers', args.num_rnn_layers)
 logger.info('rnn_units', args.rnn_units)
 logger.info('max_diffusion_step', args.max_diffusion_step)
+logger.info('adp_mx', args.adp_mx)
+logger.info('adj_mx', args.adj_mx)
 logger.info('loss', args.loss)
 logger.info('batch_size', args.batch_size)
 logger.info('epochs', args.epochs)
@@ -261,19 +242,6 @@ logger.info('epsilon', args.epsilon)
 logger.info('steps', args.steps)
 logger.info('lr_decay_ratio', args.lr_decay_ratio)
 logger.info('use_curriculum_learning', args.use_curriculum_learning)
-logger.info('cl_decay_steps', args.cl_decay_steps)
-# TODO: print new hyper-parameters
-logger.info('temp', args.temp)
-logger.info('lam', args.lam)
-logger.info('fn_t', args.fn_t)
-logger.info('top_k', args.top_k)
-logger.info('fusion_num', args.fusion_num)
-logger.info('input_masking_ratio', args.im_t)
-logger.info('backbone_schema', args.schema)
-logger.info('adj_path', args.adj_path)
-logger.info('connect', args.connect)
-logger.info('contrastive_denominator', args.contrastive_denominator)
-logger.info('adaptive', args.adaptive)
 
 cpu_num = 1
 os.environ ['OMP_NUM_THREADS'] = str(cpu_num)
@@ -288,7 +256,7 @@ device = torch.device("cuda:{}".format(args.gpu)) if torch.cuda.is_available() e
 # torch.manual_seed(args.seed)
 # if torch.cuda.is_available(): torch.cuda.manual_seed(args.seed)
 #####################################################################################################
-
+  
 data = {}
 for category in ['train', 'val', 'test']:
     cat_data = np.load(os.path.join(f'../{args.dataset}', category + '.npz'))
