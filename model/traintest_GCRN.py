@@ -189,7 +189,7 @@ parser.add_argument('--fn_t', type=int, default=12, help='filter negatives thres
 parser.add_argument('--top_k', type=int, default=10, help='graph neighbors threshold, 10 means top 10 nodes')
 parser.add_argument('--fusion_num', type=int, default=2, help='layer num of fusion layer')
 parser.add_argument('--im_t', type=int, default=0.01, help='input masking ratio')
-parser.add_argument('--schema', type=int, default=1, choices=[0, 1, 2, 3, 4], help='which contrastive backbone schema to use (0 is no contrast, i.e., baseline)')
+parser.add_argument('--schema', type=int, default=0, choices=[0, 1, 2, 3, 4], help='which contrastive backbone schema to use (0 is no contrast, i.e., baseline)')
 parser.add_argument('--contrastive_denominator', action="store_true", help='whether to contain pos_score in the denominator of contrastive loss')
 
 args = parser.parse_args()
