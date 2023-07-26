@@ -67,7 +67,7 @@ SCHEMA_1_TOPK_METRICS = np.array([[[5.36, 2.80, 7.40], [6.49, 3.24, 9.13], [7.73
 
 
 dir_name = os.path.dirname(os.path.abspath(__file__))
-save_dir = os.path.join(dir_name, 'results')
+save_dir = os.path.join(dir_name, 'Results')
 if not os.path.exists(save_dir):
     os.makedirs(save_dir, exist_ok=True)
     
