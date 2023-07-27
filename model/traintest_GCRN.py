@@ -28,9 +28,9 @@ def print_model(model):
 def get_model():  
     model = GCRN(num_nodes=args.num_nodes, input_dim=args.input_dim, output_dim=args.output_dim, horizon=args.horizon, 
                  rnn_units=args.rnn_units, num_layers=args.num_rnn_layers, embed_dim=args.embed_dim, cheb_k = args.max_diffusion_step, 
-                 cl_decay_steps=args.cl_decay_steps, use_curriculum_learning=args.use_curriculum_learning, fn_t=args.fn_t, 
+                 cl_decay_steps=args.cl_decay_steps, use_curriculum_learning=args.use_curriculum_learning, delta=args.delta, fn_t=args.fn_t, 
                  temp=args.temp, top_k=args.top_k, input_masking_ratio=args.im_t, fusion_num=args.fusion_num, 
-                 schema=args.schema, contrastive_denominator=args.contrastive_denominator, device=device).to(device)  # TODo: add new parameters here
+                 schema=args.schema, contra_denominator=args.contra_denominator, device=device).to(device)  # TODo: add new parameters here
     return model 
 
 def prepare_x_y(x, y):
@@ -42,15 +42,19 @@ def prepare_x_y(x, y):
     :return2: x: shape (seq_len, batch_size, num_sensor * input_dim)
               y: shape (horizon, batch_size, num_sensor * output_dim)
     """
-    x0 = x[..., :args.input_dim]
-    x1 = x[..., args.output_dim:]
-    y0 = y[..., :args.output_dim]
-    y1 = y[..., args.output_dim:]
+    x0 = x[..., 0:1] # x
+    x1 = x[..., 1:2] # x_cov (time in week normalize 0,2016 to 0,1)
+    x2 = x[..., 2:3] # x_his (history average)
+    y0 = y[..., 0:1] # y
+    y1 = y[..., 1:2] # y_cov
+    y2 = y[..., 2:3] # y_his
     x0 = torch.from_numpy(x0).float()
     x1 = torch.from_numpy(x1).float()
+    x2 = torch.from_numpy(x2).float()
     y0 = torch.from_numpy(y0).float()
     y1 = torch.from_numpy(y1).float()
-    return x0.to(device), x1.to(device), y0.to(device), y1.to(device)  # x, x_cov, y, y_cov
+    y2 = torch.from_numpy(y2).float()
+    return x0.to(device), x1.to(device), x2.to(device), y0.to(device), y1.to(device), y2.to(device)  # x, x_cov, x_his, y, y_cov, y_his
 
 def evaluate(model, mode):
     with torch.no_grad():
@@ -58,8 +62,8 @@ def evaluate(model, mode):
         data_iter =  data[f'{mode}_loader'].get_iterator()
         ys_true, ys_pred = [], []
         for x, y in data_iter:
-            x, xcov, y, ycov = prepare_x_y(x, y)
-            output, _ = model(x, xcov, ycov)  # TODO: add new parameters <xcov> here 
+            x, x_cov, x_his, y, y_cov, _ = prepare_x_y(x, y)
+            output, _ = model(x, x_cov, x_his, y_cov)
             y_pred = scaler.inverse_transform(output)
             y_true = scaler.inverse_transform(y)
             ys_true.append(y_true)
@@ -103,38 +107,37 @@ def traintest_model():
         start_time = time.time()
         model = model.train()
         data_iter = data['train_loader'].get_iterator()
-        losses, mae_losses, contrastive_losses = [], [], []  # TODO: record new losses here
+        losses, mae_losses, contra_losses = [], [], []  # TODO: record new losses here
         for x, y in data_iter:
             optimizer.zero_grad()
-            x, xcov, y, ycov = prepare_x_y(x, y) # TODO: modify outputs
-            output, u_loss = model(x, xcov, ycov, y, batches_seen) # TODO: add new parameters <xcov> here
+            x, x_cov, x_his, y, y_cov, _ = prepare_x_y(x, y)
+            output, u_loss = model(x, x_cov, x_his, y_cov, y, batches_seen) # TODO: add new parameters <xcov> here
             y_pred = scaler.inverse_transform(output)
             y_true = scaler.inverse_transform(y)
             mae_loss = masked_mae_loss(y_pred, y_true) # masked_mae_loss(y_pred, y_true)
-            # TODO: add self-supervised contrastive loss
+            # TODO: add self-supervised contra loss
             if u_loss is None:
                 u_loss = torch.zeros_like(mae_loss)
             loss = mae_loss + args.lam * u_loss 
             losses.append(loss.item())
             mae_losses.append(mae_loss.item())
-            contrastive_losses.append(u_loss.item())
+            contra_losses.append(u_loss.item())
             batches_seen += 1
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm) # gradient clipping - this does it in place
             optimizer.step()
         train_loss = np.mean(losses)
         train_mae_loss = np.mean(mae_losses)  # TODO: record new loss
-        train_contrastive_loss = np.mean(contrastive_losses)
+        train_contra_loss = np.mean(contra_losses)
         lr_scheduler.step()
         val_loss, _, _ = evaluate(model, 'val')
         end_time2 = time.time()
-        message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, train_mae_loss: {:.4f}, train_contrastive_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.1f}s'.format(epoch_num + 1, 
-                   args.epochs, batches_seen, train_loss, train_mae_loss, train_contrastive_loss, val_loss, optimizer.param_groups[0]['lr'], (end_time2 - start_time))
+        message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, train_mae_loss: {:.4f}, train_contra_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.1f}s'.format(epoch_num + 1, args.epochs, batches_seen, train_loss, train_mae_loss, train_contra_loss, val_loss, optimizer.param_groups[0]['lr'], (end_time2 - start_time))
         logger.info(message)
         # TODO: record loss curve
         writer.add_scalar('train loss', train_loss, epoch_num + 1)
         writer.add_scalar('mae loss', train_mae_loss, epoch_num + 1)
-        writer.add_scalar('contrastive loss', train_contrastive_loss, epoch_num + 1)
+        writer.add_scalar('contra loss', train_contra_loss, epoch_num + 1)
         writer.add_scalar('validation loss', val_loss, epoch_num + 1)
         test_loss, _, _ = evaluate(model, 'test')
         writer.add_scalar('test loss', test_loss, epoch_num + 1)
@@ -182,15 +185,16 @@ parser.add_argument("--use_curriculum_learning", type=eval, choices=[True, False
 parser.add_argument("--cl_decay_steps", type=int, default=2000, help="cl_decay_steps")
 parser.add_argument('--gpu', type=int, default=0, help='which gpu to use')
 # parser.add_argument('--seed', type=int, default=100, help='random seed.')
-# TODO: support contrastive learning
+# TODO: support contra learning
+parser.add_argument('--delta', type=float, default=0.1, help='threshold to discriminate normal and abnormal')
 parser.add_argument('--temp', type=float, default=0.1, help='temperature parameter')
 parser.add_argument('--lam', type=float, default=0.05, help='loss lambda') 
 parser.add_argument('--fn_t', type=int, default=12, help='filter negatives threshold, 12 means 1 hour')
 parser.add_argument('--top_k', type=int, default=10, help='graph neighbors threshold, 10 means top 10 nodes')
 parser.add_argument('--fusion_num', type=int, default=2, help='layer num of fusion layer')
 parser.add_argument('--im_t', type=int, default=0.01, help='input masking ratio')
-parser.add_argument('--schema', type=int, default=1, choices=[0, 1, 2, 3, 4], help='which contrastive backbone schema to use (0 is no contrast, i.e., baseline)')
-parser.add_argument('--contrastive_denominator', action="store_true", help='whether to contain pos_score in the denominator of contrastive loss')
+parser.add_argument('--schema', type=int, default=1, choices=[0, 1, 2, 3, 4, 5], help='which contra backbone schema to use (0 is no contrast, i.e., baseline)')
+parser.add_argument('--contra_denominator', type=eval, choices=[True, False], default='True', help='whether to contain pos_score in the denominator of contra loss')
 
 args = parser.parse_args()
         
@@ -258,6 +262,7 @@ logger.info('lr_decay_ratio', args.lr_decay_ratio)
 logger.info('use_curriculum_learning', args.use_curriculum_learning)
 logger.info('cl_decay_steps', args.cl_decay_steps)
 # TODO: print new hyper-parameters
+logger.info('delta', args.delta)
 logger.info('temp', args.temp)
 logger.info('lam', args.lam)
 logger.info('fn_t', args.fn_t)
@@ -265,7 +270,7 @@ logger.info('top_k', args.top_k)
 logger.info('fusion_num', args.fusion_num)
 logger.info('input_masking_ratio', args.im_t)
 logger.info('backbone_schema', args.schema)
-logger.info('contrastive_denominator', args.contrastive_denominator)
+logger.info('contra_denominator', args.contra_denominator)
 
 cpu_num = 1
 os.environ ['OMP_NUM_THREADS'] = str(cpu_num)
