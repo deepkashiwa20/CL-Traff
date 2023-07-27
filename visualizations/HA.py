@@ -51,11 +51,7 @@ def eval_historical_average(traffic_reading_df, period=7*24*12):
     rmse = masked_rmse_loss(y_predict, y_test)
     mape = masked_mape_loss(y_predict, y_test)
     mae = masked_mae_loss(y_predict, y_test)
-<<<<<<< HEAD
     print('Historical Average ---- DCRNN Baseline')
-=======
-    print('Historical Average (DCRNN Baseline)')
->>>>>>> e3e77f9efca59f60b05128d48e8d3d6ead283fe8
     print('\t'.join(['Model', 'Horizon', 'MAE', 'RMSE', 'MAPE']))
     for horizon in [1, 3, 6, 12]:
         line = 'HA\t%d\t%.2f\t%.2f\t%.2f' % (horizon, mae, rmse, mape * 100)
@@ -93,9 +89,8 @@ def get_history_average(args):
     num_samples = data.shape[0] // num_nodes
     
     preds, labels = [], []
-    data_speed = data['speed'].values.reshape(num_nodes, -1, 1).transpose(1, 0, 2)  # (34272, 207, 1)
-    data_speedy = data['speed_y'].values.reshape(num_nodes, -1, 1).transpose(1, 0, 2) 
-<<<<<<< HEAD
+    data_speed = data['speed'].values.reshape(-1, num_nodes)  # (34272, 207)
+    data_speedy = data['speed_y'].values.reshape(-1, num_nodes)
     # x_offsets = np.sort(
     #     np.concatenate((np.arange(-11, 1, 1),))
     # )
@@ -107,15 +102,6 @@ def get_history_average(args):
     #     label_t = data_speed[t + y_offsets, ...]
     #     preds.append(pred_t) 
     #     labels.append(label_t)
-=======
-    min_t = abs(min(x_offsets))
-    max_t = abs(num_samples - abs(max(y_offsets)))  # Exclusive
-    for t in range(min_t, max_t):
-        pred_t = data_speedy[t + y_offsets, ...]  #* 用当前的平均速度还是1小时后的平均速度呢?
-        label_t = data_speed[t + y_offsets, ...]
-        preds.append(pred_t) 
-        labels.append(label_t)
->>>>>>> e3e77f9efca59f60b05128d48e8d3d6ead283fe8
         
     # preds = np.stack(preds, axis=0)  # (34249, 12, 207, 1)
     # labels = np.stack(labels, axis=0)  
