@@ -91,6 +91,8 @@ def get_history_average(args):
     preds, labels = [], []
     data_speed = data['speed'].values.reshape(-1, num_nodes)  # (34272, 207)
     data_speedy = data['speed_y'].values.reshape(-1, num_nodes)
+    data_diff = data['diff'].values.reshape(-1, num_nodes)  
+    
     # x_offsets = np.sort(
     #     np.concatenate((np.arange(-11, 1, 1),))
     # )
@@ -111,8 +113,10 @@ def get_history_average(args):
     # evaluate_HA(test_preds, test_labels)
     
     num_test = round(num_samples * 0.2)  # 6584
-    preds, labels = data_speedy[-num_test:], data_speed[-num_test:]
-    test_preds, test_labels = torch.from_numpy(preds), torch.from_numpy(labels)
+    preds, labels = data_speedy[-num_test:].reshape(-1), data_speed[-num_test:].reshape(-1)
+    diffs = data_diff[-num_test:].reshape(-1)
+    normal_indices = np.where(diffs <= 10)[0]
+    test_preds, test_labels = torch.from_numpy(preds[normal_indices]), torch.from_numpy(labels[normal_indices])
     rmse = masked_rmse_loss(test_preds, test_labels)
     mape = masked_mape_loss(test_preds, test_labels)
     mae = masked_mae_loss(test_preds, test_labels)
