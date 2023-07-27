@@ -51,7 +51,7 @@ def eval_historical_average(traffic_reading_df, period=7*24*12):
     rmse = masked_rmse_loss(y_predict, y_test)
     mape = masked_mape_loss(y_predict, y_test)
     mae = masked_mae_loss(y_predict, y_test)
-    print('Historical Average')
+    print('Historical Average ---- DCRNN Baseline')
     print('\t'.join(['Model', 'Horizon', 'MAE', 'RMSE', 'MAPE']))
     for horizon in [1, 3, 6, 12]:
         line = 'HA\t%d\t%.2f\t%.2f\t%.2f' % (horizon, mae, rmse, mape * 100)
@@ -87,39 +87,40 @@ def get_history_average(args):
     data = extract_data(args)
     num_nodes = args.num_nodes
     num_samples = data.shape[0] // num_nodes
-    x_offsets = np.sort(
-        np.concatenate((np.arange(-11, 1, 1),))
-    )
-    y_offsets = np.sort(np.arange(1, 13, 1))
+    
     preds, labels = [], []
     data_speed = data['speed'].values.reshape(num_nodes, -1, 1).transpose(1, 0, 2)  # (34272, 207, 1)
     data_speedy = data['speed_y'].values.reshape(num_nodes, -1, 1).transpose(1, 0, 2) 
-    min_t = abs(min(x_offsets))
-    max_t = abs(num_samples - abs(max(y_offsets)))  # Exclusive
-    for t in range(min_t, max_t):
-        pred_t = data_speedy[t + y_offsets, ...]
-        label_t = data_speed[t + y_offsets, ...]
-        preds.append(pred_t) 
-        labels.append(label_t)
+    # x_offsets = np.sort(
+    #     np.concatenate((np.arange(-11, 1, 1),))
+    # )
+    # y_offsets = np.sort(np.arange(1, 13, 1))
+    # min_t = abs(min(x_offsets))
+    # max_t = abs(num_samples - abs(max(y_offsets)))  # Exclusive
+    # for t in range(min_t, max_t):
+    #     pred_t = data_speedy[t + y_offsets, ...]
+    #     label_t = data_speed[t + y_offsets, ...]
+    #     preds.append(pred_t) 
+    #     labels.append(label_t)
         
-    preds = np.stack(preds, axis=0)  # (34249, 12, 207, 1)
-    labels = np.stack(labels, axis=0)  
+    # preds = np.stack(preds, axis=0)  # (34249, 12, 207, 1)
+    # labels = np.stack(labels, axis=0)  
     
-    num_test = round(labels.shape[0] * 0.2)
-    test_preds, test_labels = torch.from_numpy(preds[-num_test:]), torch.from_numpy(labels[-num_test:])
-    evaluate_HA(test_preds, test_labels)
+    # num_test = round(labels.shape[0] * 0.2)
+    # test_preds, test_labels = torch.from_numpy(preds[-num_test:]), torch.from_numpy(labels[-num_test:])
+    # evaluate_HA(test_preds, test_labels)
     
-    # num_test = round(num_samples * 0.2)
-    # preds, labels = data_speedy[-num_test:], data_speed[-num_test:]
-    # test_preds, test_labels = torch.from_numpy(preds), torch.from_numpy(labels)
-    # rmse = masked_rmse_loss(test_preds, test_labels)
-    # mape = masked_mape_loss(test_preds, test_labels)
-    # mae = masked_mae_loss(test_preds, test_labels)
-    # print('Historical Average')
-    # print('\t'.join(['Model', 'Horizon', 'MAE', 'RMSE', 'MAPE']))
-    # for horizon in [1, 3, 6, 12]:
-    #     line = 'HA\t%d\t%.2f\t%.2f\t%.2f' % (horizon, mae, rmse, mape * 100)
-    #     print(line)
+    num_test = round(num_samples * 0.2)  # 6584
+    preds, labels = data_speedy[-num_test:], data_speed[-num_test:]
+    test_preds, test_labels = torch.from_numpy(preds), torch.from_numpy(labels)
+    rmse = masked_rmse_loss(test_preds, test_labels)
+    mape = masked_mape_loss(test_preds, test_labels)
+    mae = masked_mae_loss(test_preds, test_labels)
+    print('Historical Average ---- Our method')
+    print('\t'.join(['Model', 'Horizon', 'MAE', 'RMSE', 'MAPE']))
+    for horizon in [1, 3, 6, 12]:
+        line = 'HA\t%d\t%.2f\t%.2f\t%.2f' % (horizon, mae, rmse, mape * 100)
+        print(line)
     
 def get_statistics_analysis(args):
     data = extract_data(args)
@@ -135,8 +136,8 @@ def get_statistics_analysis(args):
     train_exception_std, test_exception_std = train_data.std(), test_data.std()
     train_exception_max, test_exception_max = train_data.max(), test_data.max()
     train_exception_min, test_exception_min = train_data.min(), test_data.min()
-    print('Train Statistics: mean: {:.2f}, std: {:.2f}'.format(train_exception_mean, train_exception_std))  # 9.66, 13.61
-    print('Test Statistics: mean: {:.2f}, std: {:.2f}'.format(test_exception_mean, test_exception_std))  # 12.73, 17.46
+    print('Train Statistics: mean: {:.2f}, std: {:.2f}'.format(train_exception_mean, train_exception_std))  # 7.99, 16.04
+    print('Test Statistics: mean: {:.2f}, std: {:.2f}'.format(test_exception_mean, test_exception_std))  # 10.92, 19.57
     print('Train Statistics: max: {:.2f}, min: {:.2f}'.format(train_exception_max, train_exception_min))
     print('Test Statistics: max: {:.2f}, min: {:.2f}'.format(test_exception_max, test_exception_min))
     train_counts, test_counts = [], []
@@ -176,8 +177,8 @@ def get_statistics_analysis(args):
 
 def main(args):
     print("Visualizing statistics analysis...")
-    # traffic_reading_df = pd.read_hdf(os.path.join(dir_name, "..", args.traffic_reading_filename))
-    # eval_historical_average(traffic_reading_df, period=7 * 24 * 12)
+    traffic_reading_df = pd.read_hdf(os.path.join(dir_name, "..", args.traffic_reading_filename))
+    eval_historical_average(traffic_reading_df, period=7 * 24 * 12)
     get_history_average(args)
     get_statistics_analysis(args)
     
