@@ -51,7 +51,7 @@ def eval_historical_average(traffic_reading_df, period=7*24*12):
     rmse = masked_rmse_loss(y_predict, y_test)
     mape = masked_mape_loss(y_predict, y_test)
     mae = masked_mae_loss(y_predict, y_test)
-    print('Historical Average')
+    print('Historical Average (DCRNN Baseline)')
     print('\t'.join(['Model', 'Horizon', 'MAE', 'RMSE', 'MAPE']))
     for horizon in [1, 3, 6, 12]:
         line = 'HA\t%d\t%.2f\t%.2f\t%.2f' % (horizon, mae, rmse, mape * 100)
@@ -97,7 +97,7 @@ def get_history_average(args):
     min_t = abs(min(x_offsets))
     max_t = abs(num_samples - abs(max(y_offsets)))  # Exclusive
     for t in range(min_t, max_t):
-        pred_t = data_speedy[t + y_offsets, ...]
+        pred_t = data_speedy[t + y_offsets, ...]  #* 用当前的平均速度还是1小时后的平均速度呢?
         label_t = data_speed[t + y_offsets, ...]
         preds.append(pred_t) 
         labels.append(label_t)
@@ -176,8 +176,8 @@ def get_statistics_analysis(args):
 
 def main(args):
     print("Visualizing statistics analysis...")
-    # traffic_reading_df = pd.read_hdf(os.path.join(dir_name, "..", args.traffic_reading_filename))
-    # eval_historical_average(traffic_reading_df, period=7 * 24 * 12)
+    traffic_reading_df = pd.read_hdf(os.path.join(dir_name, "..", args.traffic_reading_filename))
+    eval_historical_average(traffic_reading_df, period=7 * 24 * 12)
     get_history_average(args)
     get_statistics_analysis(args)
     
