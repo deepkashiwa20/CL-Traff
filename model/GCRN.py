@@ -113,9 +113,7 @@ class GCRNN_Decoder(nn.Module):
 
 
 class GCRN(nn.Module):
-    def __init__(self, num_nodes, input_dim, output_dim, horizon, rnn_units, num_layers=1, embed_dim=8, cheb_k=3, ycov_dim=1, cl_decay_steps=2000, 
-                 use_curriculum_learning=True, fn_t=12, temp=0.1, top_k=10, input_masking_ratio=0.01, fusion_num=1, schema=1,  
-                 contrastive_denominator=False, device="cpu"):
+    def __init__(self, num_nodes, input_dim, output_dim, horizon, rnn_units, num_layers=1, embed_dim=8, cheb_k=3, ycov_dim=1, cl_decay_steps=2000, use_curriculum_learning=True, delta=0.1, fn_t=12, temp=0.1, top_k=10, input_masking_ratio=0.01, fusion_num=1, schema=1, contra_denominator=True, device="cpu"):
         super(GCRN, self).__init__()
         self.num_nodes = num_nodes
         self.input_dim = input_dim
@@ -131,6 +129,7 @@ class GCRN(nn.Module):
         self.cl_decay_steps = cl_decay_steps
         self.use_curriculum_learning = use_curriculum_learning
         # TODO: support contrastive learning
+        self.delta = delta
         self.fn_t = fn_t
         self.temp = temp
         self.top_k = top_k
@@ -138,7 +137,7 @@ class GCRN(nn.Module):
         self.im_t = input_masking_ratio
         self.fusion_num = fusion_num
         self.schema = schema
-        self.contrastive_denominator = contrastive_denominator
+        self.contra_denominator = contra_denominator
         
         # graph
         self.node_embeddings = nn.Parameter(torch.randn(self.num_nodes, self.embed_dim), requires_grad=True)
@@ -254,10 +253,10 @@ class GCRN(nn.Module):
             spatial_matrix = spatial_matrix * adj
         spatial_neg = torch.sum(spatial_matrix, dim=2) # (bs, node)
 
-        if not self.contrastive_denominator:
+        if not self.contra_denominator:
             ratio = pos_sum / (spatial_neg + tempo_neg.transpose(0,1) - pos_sum)
         else:
-         ratio = pos_sum / (spatial_neg + tempo_neg.transpose(0,1))
+            ratio = pos_sum / (spatial_neg + tempo_neg.transpose(0,1))
         # ratio = pos_sum / tempo_neg.transpose(0,1)  #* no spatial_neg is not better than with spatial_neg
         u_loss = torch.mean(-torch.log(ratio))
         return u_loss    
@@ -267,7 +266,7 @@ class GCRN(nn.Module):
         eps = torch.randn_like(std)
         return eps.mul(std).add_(mu) # return z sample
     
-    def forward(self, x, x_cov, y_cov, labels=None, batches_seen=None):
+    def forward(self, x, x_cov, x_his, y_cov, labels=None, batches_seen=None):
         support = F.softmax(F.relu(torch.mm(self.node_embeddings, self.node_embeddings.transpose(0, 1))), dim=1)
         
         init_state = self.encoder.init_hidden(x.shape[0])
@@ -301,6 +300,12 @@ class GCRN(nn.Module):
             init_state_aug = self.encoder.init_hidden(x_.shape[0])
             h_en_aug, state_en_aug = self.encoder(x_, init_state_aug, support) # B, T, N, hidden      
             h_t_aug = h_en_aug[:, -1, :, :]   # B, N, hidden (last state) 
+        
+        if labels is not None and self.schema == 5:
+            init_state_aug = self.encoder.init_hidden(x.shape[0])
+            h_en_aug, _ = self.encoder(x_his, init_state_aug, support) # B, T, N, hidden the same encoder
+            h_t_aug = h_en_aug[:, -1, :, :]   # B, N, hidden (last state)
+            # [todo] self.delta is used to discriminate normal and abnormal 
             
         go = torch.zeros((x.shape[0], self.num_nodes, self.output_dim), device=x.device)
         out = []
@@ -315,7 +320,7 @@ class GCRN(nn.Module):
         output = torch.stack(out, dim=1)
         
         # TODO self-supervised contrastive learning
-        if labels is not None and self.schema in [1, 2, 3, 4]:
+        if labels is not None and self.schema in [1, 2, 3, 4, 5]:
             u_loss = self.get_unsupervised_loss(x_cov, h_t, h_t_aug, support)
             return output, u_loss
         return output, None
