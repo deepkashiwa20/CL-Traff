@@ -15,7 +15,7 @@ from utils import StandardScaler, DataLoader, masked_mae_loss, masked_mape_loss,
 from GCRN import GCRN
 from torch.utils.tensorboard import SummaryWriter 
 
-def set_random_seed(seed):
+def set_seed(seed):
     random.seed(seed)
     os.environ['PYTHONHASHSEED'] = str(seed)
     np.random.seed(seed)
@@ -23,6 +23,76 @@ def set_random_seed(seed):
     torch.cuda.manual_seed(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
+def filter_negative(input_, thres):
+        times = input_[:, 0, 0, 0]
+        m = []
+        cnt = 0
+        c = thres / 288
+        for t in times:
+            if t < c:
+                st = times < 0
+                gt = torch.logical_and(times <= (1 + t - c), times >= (t + c))
+            elif t > (1 - c):
+                st = torch.logical_and(times <= (t - c), times >= (c + t - 1))
+                gt = times > 1
+            else:
+                st = times <= (t - c)
+                gt = times >= (t + c)
+            
+            res = torch.logical_or(st, gt).view(1, -1)
+            # res[0, cnt] = True
+            # cnt += 1
+            m.append(res)
+        m = torch.cat(m)
+        return m
+    
+def get_unsupervised_loss(inputs, rep, rep_aug, support):
+    """
+        inputs: input (bs, T, node, in_dim) in_dim=1, i.e., time slot
+        rep: original representation, (bs, node, dim)
+        rep_aug: its augmented representation, (bs, node, dim)
+        return: u_loss, i.e., unsupervised contrastive loss
+    """
+    # temporal contrast
+    tempo_rep = rep.transpose(0,1) # (node, bs, dim)
+    tempo_rep_aug = rep_aug.transpose(0,1)
+    tempo_norm = tempo_rep.norm(dim=2).unsqueeze(dim=2)
+    tempo_norm_aug = tempo_rep_aug.norm(dim=2).unsqueeze(dim=2)
+    tempo_matrix = torch.matmul(tempo_rep, tempo_rep_aug.transpose(1,2)) / torch.matmul(tempo_norm, tempo_norm_aug.transpose(1,2))
+    tempo_matrix = torch.exp(tempo_matrix / args.temp)
+
+    # temporal negative filter
+    if args.fn_t:
+        m = filter_negative(inputs, args.fn_t)
+        tempo_matrix = tempo_matrix * m
+    tempo_neg = torch.sum(tempo_matrix, dim=2) # (node, bs)
+
+    # spatial contrast
+    spatial_norm = rep.norm(dim=2).unsqueeze(dim=2)
+    spatial_norm_aug = rep_aug.norm(dim=2).unsqueeze(dim=2)
+    spatial_matrix = torch.matmul(rep, rep_aug.transpose(1,2)) / torch.matmul(spatial_norm, spatial_norm_aug.transpose(1,2))
+    spatial_matrix = torch.exp(spatial_matrix / args.temp)  # (bs, node, node)
+    
+    diag = torch.eye(args.num_nodes, dtype=torch.bool).to(device)
+    pos_sum = torch.sum(spatial_matrix * diag, dim=2) # (bs, node)
+    
+    # spatial negative filter
+    if args.fn_t:
+        _, indices = torch.topk(support, k=args.top_k+1, dim=-1)  # (node, k)
+        adj = torch.ones((args.num_nodes, args.num_nodes), dtype=torch.bool).to(device)
+        adj[torch.arange(adj.size(0)).unsqueeze(1), indices] = False
+        adj = adj + diag
+        spatial_matrix = spatial_matrix * adj
+    spatial_neg = torch.sum(spatial_matrix, dim=2) # (bs, node)
+
+    if not args.contra_denominator:
+        ratio = pos_sum / (spatial_neg + tempo_neg.transpose(0,1) - pos_sum)
+    else:
+        ratio = pos_sum / (spatial_neg + tempo_neg.transpose(0,1))
+    # ratio = pos_sum / tempo_neg.transpose(0,1)  #* no spatial_neg is not better than with spatial_neg
+    u_loss = torch.mean(-torch.log(ratio))
+    return u_loss    
 
 def print_model(model):
     param_count = 0
@@ -37,9 +107,8 @@ def print_model(model):
 def get_model():  
     model = GCRN(num_nodes=args.num_nodes, input_dim=args.input_dim, output_dim=args.output_dim, horizon=args.horizon, 
                  rnn_units=args.rnn_units, num_layers=args.num_rnn_layers, embed_dim=args.embed_dim, cheb_k = args.max_diffusion_step, 
-                 cl_decay_steps=args.cl_decay_steps, use_curriculum_learning=args.use_curriculum_learning, delta=args.delta, fn_t=args.fn_t, 
-                 temp=args.temp, top_k=args.top_k, input_masking_ratio=args.im_t, fusion_num=args.fusion_num, 
-                 schema=args.schema, contra_denominator=args.contra_denominator, device=device).to(device)  # TODo: add new parameters here
+                 cl_decay_steps=args.cl_decay_steps, use_curriculum_learning=args.use_curriculum_learning, delta=args.delta, input_masking_ratio=args.im_t, fusion_num=args.fusion_num, 
+                 schema=args.schema, device=device).to(device)  # TODo: add new parameters here
     return model 
 
 def prepare_x_y(x, y):
@@ -72,7 +141,7 @@ def evaluate(model, mode):
         ys_true, ys_pred = [], []
         for x, y in data_iter:
             x, x_cov, x_his, y, y_cov, _ = prepare_x_y(x, y)
-            output, _ = model(x, x_cov, x_his, y_cov)
+            output, _, _, _ = model(x, x_his, y_cov)
             y_pred = scaler.inverse_transform(output)
             y_true = scaler.inverse_transform(y)
             ys_true.append(y_true)
@@ -120,13 +189,16 @@ def traintest_model():
         for x, y in data_iter:
             optimizer.zero_grad()
             x, x_cov, x_his, y, y_cov, _ = prepare_x_y(x, y)
-            output, u_loss = model(x, x_cov, x_his, y_cov, y, batches_seen) # TODO: add new parameters <xcov> here
+            # output, u_loss = model(x, x_cov, x_his, y_cov, y, batches_seen) # TODO: add new parameters <xcov> here
+            output, rep, rep_aug, support = model(x, x_his, y_cov, y, batches_seen) # TODO: add new parameters <xcov> here
             y_pred = scaler.inverse_transform(output)
             y_true = scaler.inverse_transform(y)
             mae_loss = masked_mae_loss(y_pred, y_true) # masked_mae_loss(y_pred, y_true)
             # TODO: add self-supervised contra loss
-            if u_loss is None:
+            if rep is None:
                 u_loss = torch.zeros_like(mae_loss)
+            else:
+                u_loss = get_unsupervised_loss(x_cov, rep, rep_aug, support)
             loss = mae_loss + args.lam * u_loss 
             losses.append(loss.item())
             mae_losses.append(mae_loss.item())
@@ -202,7 +274,7 @@ parser.add_argument('--fn_t', type=int, default=12, help='filter negatives thres
 parser.add_argument('--top_k', type=int, default=10, help='graph neighbors threshold, 10 means top 10 nodes')
 parser.add_argument('--fusion_num', type=int, default=2, help='layer num of fusion layer')
 parser.add_argument('--im_t', type=int, default=0.01, help='input masking ratio')
-parser.add_argument('--schema', type=int, default=1, choices=[0, 1, 2, 3, 4, 5], help='which contra backbone schema to use (0 is no contrast, i.e., baseline)')
+parser.add_argument('--schema', type=int, default=0, choices=[0, 1, 2, 3, 4, 5], help='which contra backbone schema to use (0 is no contrast, i.e., baseline)')
 parser.add_argument('--contra_denominator', type=eval, choices=[True, False], default='True', help='whether to contain pos_score in the denominator of contra loss')
 
 args = parser.parse_args()
@@ -288,7 +360,7 @@ os.environ ['MKL_NUM_THREADS'] = str(cpu_num)
 os.environ ['VECLIB_MAXIMUM_THREADS'] = str(cpu_num)
 os.environ ['NUMEXPR_NUM_THREADS'] = str(cpu_num)
 torch.set_num_threads(cpu_num)
-set_random_seed(args.seed)
+set_seed(args.seed)
 device = torch.device("cuda:{}".format(args.gpu)) if torch.cuda.is_available() else torch.device("cpu")
 #####################################################################################################
 
