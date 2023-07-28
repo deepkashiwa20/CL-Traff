@@ -3,7 +3,7 @@ import os
 import shutil
 import numpy as np
 import pandas as pd
-import time
+import time, random
 import torch
 import torch.nn as nn
 import torch.nn.init as init
@@ -14,6 +14,15 @@ import logging
 from utils import StandardScaler, DataLoader, masked_mae_loss, masked_mape_loss, masked_mse_loss, masked_rmse_loss
 from GCRN import GCRN
 from torch.utils.tensorboard import SummaryWriter 
+
+def set_random_seed(seed):
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 def print_model(model):
     param_count = 0
@@ -184,9 +193,9 @@ parser.add_argument("--max_grad_norm", type=int, default=5, help="max_grad_norm"
 parser.add_argument("--use_curriculum_learning", type=eval, choices=[True, False], default='True', help="use_curriculum_learning")
 parser.add_argument("--cl_decay_steps", type=int, default=2000, help="cl_decay_steps")
 parser.add_argument('--gpu', type=int, default=0, help='which gpu to use')
-# parser.add_argument('--seed', type=int, default=100, help='random seed.')
+parser.add_argument('--seed', type=int, default=100, help='random seed.')
 # TODO: support contra learning
-parser.add_argument('--delta', type=float, default=0.1, help='threshold to discriminate normal and abnormal')
+parser.add_argument('--delta', type=float, default=10, help='threshold to discriminate normal and abnormal')
 parser.add_argument('--temp', type=float, default=0.1, help='temperature parameter')
 parser.add_argument('--lam', type=float, default=0.05, help='loss lambda') 
 parser.add_argument('--fn_t', type=int, default=12, help='filter negatives threshold, 12 means 1 hour')
@@ -279,11 +288,8 @@ os.environ ['MKL_NUM_THREADS'] = str(cpu_num)
 os.environ ['VECLIB_MAXIMUM_THREADS'] = str(cpu_num)
 os.environ ['NUMEXPR_NUM_THREADS'] = str(cpu_num)
 torch.set_num_threads(cpu_num)
+set_random_seed(args.seed)
 device = torch.device("cuda:{}".format(args.gpu)) if torch.cuda.is_available() else torch.device("cpu")
-# Please comment the following three lines for running experiments multiple times.
-# np.random.seed(args.seed)
-# torch.manual_seed(args.seed)
-# if torch.cuda.is_available(): torch.cuda.manual_seed(args.seed)
 #####################################################################################################
 
 data = {}
