@@ -3,7 +3,7 @@ import os
 import shutil
 import numpy as np
 import pandas as pd
-import time, random
+import time
 import torch
 import torch.nn as nn
 import torch.nn.init as init
@@ -13,86 +13,6 @@ import argparse
 import logging
 from utils import StandardScaler, DataLoader, masked_mae_loss, masked_mape_loss, masked_mse_loss, masked_rmse_loss
 from GCRN import GCRN
-from torch.utils.tensorboard import SummaryWriter 
-
-def set_seed(seed):
-    random.seed(seed)
-    os.environ['PYTHONHASHSEED'] = str(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
-def filter_negative(input_, thres):
-        times = input_[:, 0, 0, 0]
-        m = []
-        cnt = 0
-        c = thres / 288
-        for t in times:
-            if t < c:
-                st = times < 0
-                gt = torch.logical_and(times <= (1 + t - c), times >= (t + c))
-            elif t > (1 - c):
-                st = torch.logical_and(times <= (t - c), times >= (c + t - 1))
-                gt = times > 1
-            else:
-                st = times <= (t - c)
-                gt = times >= (t + c)
-            
-            res = torch.logical_or(st, gt).view(1, -1)
-            # res[0, cnt] = True
-            # cnt += 1
-            m.append(res)
-        m = torch.cat(m)
-        return m
-    
-def get_unsupervised_loss(inputs, rep, rep_aug, support):
-    """
-        inputs: input (bs, T, node, in_dim) in_dim=1, i.e., time slot
-        rep: original representation, (bs, node, dim)
-        rep_aug: its augmented representation, (bs, node, dim)
-        return: u_loss, i.e., unsupervised contrastive loss
-    """
-    # temporal contrast
-    tempo_rep = rep.transpose(0,1) # (node, bs, dim)
-    tempo_rep_aug = rep_aug.transpose(0,1)
-    tempo_norm = tempo_rep.norm(dim=2).unsqueeze(dim=2)
-    tempo_norm_aug = tempo_rep_aug.norm(dim=2).unsqueeze(dim=2)
-    tempo_matrix = torch.matmul(tempo_rep, tempo_rep_aug.transpose(1,2)) / torch.matmul(tempo_norm, tempo_norm_aug.transpose(1,2))
-    tempo_matrix = torch.exp(tempo_matrix / args.temp)
-
-    # temporal negative filter
-    if args.fn_t:
-        m = filter_negative(inputs, args.fn_t)
-        tempo_matrix = tempo_matrix * m
-    tempo_neg = torch.sum(tempo_matrix, dim=2) # (node, bs)
-
-    # spatial contrast
-    spatial_norm = rep.norm(dim=2).unsqueeze(dim=2)
-    spatial_norm_aug = rep_aug.norm(dim=2).unsqueeze(dim=2)
-    spatial_matrix = torch.matmul(rep, rep_aug.transpose(1,2)) / torch.matmul(spatial_norm, spatial_norm_aug.transpose(1,2))
-    spatial_matrix = torch.exp(spatial_matrix / args.temp)  # (bs, node, node)
-    
-    diag = torch.eye(args.num_nodes, dtype=torch.bool).to(device)
-    pos_sum = torch.sum(spatial_matrix * diag, dim=2) # (bs, node)
-    
-    # spatial negative filter
-    if args.fn_t:
-        _, indices = torch.topk(support, k=args.top_k+1, dim=-1)  # (node, k)
-        adj = torch.ones((args.num_nodes, args.num_nodes), dtype=torch.bool).to(device)
-        adj[torch.arange(adj.size(0)).unsqueeze(1), indices] = False
-        adj = adj + diag
-        spatial_matrix = spatial_matrix * adj
-    spatial_neg = torch.sum(spatial_matrix, dim=2) # (bs, node)
-
-    if not args.contra_denominator:
-        ratio = pos_sum / (spatial_neg + tempo_neg.transpose(0,1) - pos_sum)
-    else:
-        ratio = pos_sum / (spatial_neg + tempo_neg.transpose(0,1))
-    # ratio = pos_sum / tempo_neg.transpose(0,1)  #* no spatial_neg is not better than with spatial_neg
-    u_loss = torch.mean(-torch.log(ratio))
-    return u_loss    
 
 def print_model(model):
     param_count = 0
@@ -106,10 +26,9 @@ def print_model(model):
 
 def get_model():  
     model = GCRN(num_nodes=args.num_nodes, input_dim=args.input_dim, output_dim=args.output_dim, horizon=args.horizon, 
-                 rnn_units=args.rnn_units, num_layers=args.num_rnn_layers, embed_dim=args.embed_dim, cheb_k = args.max_diffusion_step, 
-                 cl_decay_steps=args.cl_decay_steps, use_curriculum_learning=args.use_curriculum_learning, delta=args.delta, input_masking_ratio=args.im_t, fusion_num=args.fusion_num, 
-                 schema=args.schema, device=device).to(device)  # TODo: add new parameters here
-    return model 
+                 rnn_units=args.rnn_units, rnn_layers=args.rnn_layers, embed_dim=args.embed_dim, cheb_k = args.max_diffusion_step, 
+                 cl_decay_steps=args.cl_decay_steps, use_curriculum_learning=args.use_curriculum_learning).to(device)
+    return model
 
 def prepare_x_y(x, y):
     """
@@ -120,19 +39,13 @@ def prepare_x_y(x, y):
     :return2: x: shape (seq_len, batch_size, num_sensor * input_dim)
               y: shape (horizon, batch_size, num_sensor * output_dim)
     """
-    x0 = x[..., 0:1] # x
-    x1 = x[..., 1:2] # x_cov (time in week normalize 0,2016 to 0,1)
-    x2 = x[..., 2:3] # x_his (history average)
-    y0 = y[..., 0:1] # y
-    y1 = y[..., 1:2] # y_cov
-    y2 = y[..., 2:3] # y_his
+    x0 = x[..., :args.input_dim]
+    y0 = y[..., :args.output_dim]
+    y1 = y[..., args.output_dim:]
     x0 = torch.from_numpy(x0).float()
-    x1 = torch.from_numpy(x1).float()
-    x2 = torch.from_numpy(x2).float()
     y0 = torch.from_numpy(y0).float()
     y1 = torch.from_numpy(y1).float()
-    y2 = torch.from_numpy(y2).float()
-    return x0.to(device), x1.to(device), x2.to(device), y0.to(device), y1.to(device), y2.to(device)  # x, x_cov, x_his, y, y_cov, y_his
+    return x0.to(device), y0.to(device), y1.to(device) # x, y, y_cov
 
 def evaluate(model, mode):
     with torch.no_grad():
@@ -140,8 +53,8 @@ def evaluate(model, mode):
         data_iter =  data[f'{mode}_loader'].get_iterator()
         ys_true, ys_pred = [], []
         for x, y in data_iter:
-            x, x_cov, x_his, y, y_cov, _ = prepare_x_y(x, y)
-            output, _, _, _ = model(x, x_his, y_cov)
+            x, y, ycov = prepare_x_y(x, y)
+            output = model(x, ycov)
             y_pred = scaler.inverse_transform(output)
             y_true = scaler.inverse_transform(y)
             ys_true.append(y_true)
@@ -164,10 +77,10 @@ def evaluate(model, mode):
             mae_12 = masked_mae_loss(ys_pred[11:12], ys_true[11:12]).item()
             mape_12 = masked_mape_loss(ys_pred[11:12], ys_true[11:12]).item()
             rmse_12 = masked_rmse_loss(ys_pred[11:12], ys_true[11:12]).item()
-            logger.info('Horizon overall: mae: {:.4f}, mape: {:.4f}, rmse: {:.4f}'.format(mae, mape * 100, rmse))
-            logger.info('Horizon 15mins: mae: {:.4f}, mape: {:.4f}, rmse: {:.4f}'.format(mae_3, mape_3 * 100, rmse_3))
-            logger.info('Horizon 30mins: mae: {:.4f}, mape: {:.4f}, rmse: {:.4f}'.format(mae_6, mape_6 * 100, rmse_6))
-            logger.info('Horizon 60mins: mae: {:.4f}, mape: {:.4f}, rmse: {:.4f}'.format(mae_12, mape_12 * 100, rmse_12))
+            logger.info('Horizon overall: mae: {:.4f}, mape: {:.4f}, rmse: {:.4f}'.format(mae, mape, rmse))
+            logger.info('Horizon 15mins: mae: {:.4f}, mape: {:.4f}, rmse: {:.4f}'.format(mae_3, mape_3, rmse_3))
+            logger.info('Horizon 30mins: mae: {:.4f}, mape: {:.4f}, rmse: {:.4f}'.format(mae_6, mape_6, rmse_6))
+            logger.info('Horizon 60mins: mae: {:.4f}, mape: {:.4f}, rmse: {:.4f}'.format(mae_12, mape_12, rmse_12))
             ys_true, ys_pred = ys_true.permute(1, 0, 2, 3), ys_pred.permute(1, 0, 2, 3)
         
         return loss, ys_true, ys_pred
@@ -185,43 +98,27 @@ def traintest_model():
         start_time = time.time()
         model = model.train()
         data_iter = data['train_loader'].get_iterator()
-        losses, mae_losses, contra_losses = [], [], []  # TODO: record new losses here
+        losses = []
         for x, y in data_iter:
             optimizer.zero_grad()
-            x, x_cov, x_his, y, y_cov, _ = prepare_x_y(x, y)
-            # output, u_loss = model(x, x_cov, x_his, y_cov, y, batches_seen) # TODO: add new parameters <xcov> here
-            output, rep, rep_aug, support = model(x, x_his, y_cov, y, batches_seen) # TODO: add new parameters <xcov> here
+            x, y, ycov = prepare_x_y(x, y)
+            output = model(x, ycov, y, batches_seen)
             y_pred = scaler.inverse_transform(output)
             y_true = scaler.inverse_transform(y)
-            mae_loss = masked_mae_loss(y_pred, y_true) # masked_mae_loss(y_pred, y_true)
-            # TODO: add self-supervised contra loss
-            if rep is None:
-                u_loss = torch.zeros_like(mae_loss)
-            else:
-                u_loss = get_unsupervised_loss(x_cov, rep, rep_aug, support)
-            loss = mae_loss + args.lam * u_loss 
+            loss = masked_mae_loss(y_pred, y_true) # masked_mae_loss(y_pred, y_true)
             losses.append(loss.item())
-            mae_losses.append(mae_loss.item())
-            contra_losses.append(u_loss.item())
             batches_seen += 1
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm) # gradient clipping - this does it in place
             optimizer.step()
         train_loss = np.mean(losses)
-        train_mae_loss = np.mean(mae_losses)  # TODO: record new loss
-        train_contra_loss = np.mean(contra_losses)
         lr_scheduler.step()
         val_loss, _, _ = evaluate(model, 'val')
         end_time2 = time.time()
-        message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, train_mae_loss: {:.4f}, train_contra_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.1f}s'.format(epoch_num + 1, args.epochs, batches_seen, train_loss, train_mae_loss, train_contra_loss, val_loss, optimizer.param_groups[0]['lr'], (end_time2 - start_time))
+        message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.1f}s'.format(epoch_num + 1, 
+                   args.epochs, batches_seen, train_loss, val_loss, optimizer.param_groups[0]['lr'], (end_time2 - start_time))
         logger.info(message)
-        # TODO: record loss curve
-        writer.add_scalar('train loss', train_loss, epoch_num + 1)
-        writer.add_scalar('mae loss', train_mae_loss, epoch_num + 1)
-        writer.add_scalar('contra loss', train_contra_loss, epoch_num + 1)
-        writer.add_scalar('validation loss', val_loss, epoch_num + 1)
         test_loss, _, _ = evaluate(model, 'test')
-        writer.add_scalar('test loss', test_loss, epoch_num + 1)
 
         if val_loss < min_val_loss:
             wait = 0
@@ -251,7 +148,7 @@ parser.add_argument('--input_dim', type=int, default=1, help='number of input ch
 parser.add_argument('--output_dim', type=int, default=1, help='number of output channel')
 parser.add_argument('--embed_dim', type=int, default=8, help='embedding dimension for adaptive graph')
 parser.add_argument('--max_diffusion_step', type=int, default=3, help='max diffusion step or Cheb K')
-parser.add_argument('--num_rnn_layers', type=int, default=1, help='number of rnn layers')
+parser.add_argument('--rnn_layers', type=int, default=1, help='number of rnn layers')
 parser.add_argument('--rnn_units', type=int, default=64, help='number of rnn units')
 parser.add_argument("--loss", type=str, default='mask_mae_loss', help="mask_mae_loss")
 parser.add_argument("--epochs", type=int, default=200, help="number of epochs of training")
@@ -266,17 +163,6 @@ parser.add_argument("--use_curriculum_learning", type=eval, choices=[True, False
 parser.add_argument("--cl_decay_steps", type=int, default=2000, help="cl_decay_steps")
 parser.add_argument('--gpu', type=int, default=0, help='which gpu to use')
 parser.add_argument('--seed', type=int, default=100, help='random seed.')
-# TODO: support contra learning
-parser.add_argument('--delta', type=float, default=10, help='threshold to discriminate normal and abnormal')
-parser.add_argument('--temp', type=float, default=0.1, help='temperature parameter')
-parser.add_argument('--lam', type=float, default=0.05, help='loss lambda') 
-parser.add_argument('--fn_t', type=int, default=12, help='filter negatives threshold, 12 means 1 hour')
-parser.add_argument('--top_k', type=int, default=10, help='graph neighbors threshold, 10 means top 10 nodes')
-parser.add_argument('--fusion_num', type=int, default=2, help='layer num of fusion layer')
-parser.add_argument('--im_t', type=int, default=0.01, help='input masking ratio')
-parser.add_argument('--schema', type=int, default=0, choices=[0, 1, 2, 3, 4, 5], help='which contra backbone schema to use (0 is no contrast, i.e., baseline)')
-parser.add_argument('--contra_denominator', type=eval, choices=[True, False], default='True', help='whether to contain pos_score in the denominator of contra loss')
-
 args = parser.parse_args()
         
 if args.dataset == 'METRLA':
@@ -292,15 +178,14 @@ model_name = 'GCRN'
 timestring = time.strftime('%Y%m%d%H%M%S', time.localtime())
 path = f'../save/{args.dataset}_{model_name}_{timestring}'
 logging_path = f'{path}/{model_name}_{timestring}_logging.txt'
-# score_path = f'{path}/{model_name}_{timestring}_scores.txt'
-# epochlog_path = f'{path}/{model_name}_{timestring}_epochlog.txt'
+score_path = f'{path}/{model_name}_{timestring}_scores.txt'
+epochlog_path = f'{path}/{model_name}_{timestring}_epochlog.txt'
 modelpt_path = f'{path}/{model_name}_{timestring}.pt'
 if not os.path.exists(path): os.makedirs(path)
 shutil.copy2(sys.argv[0], path)
 shutil.copy2(f'{model_name}.py', path)
 shutil.copy2('utils.py', path)
     
-writer = SummaryWriter(path)  # TODO: use tensorboard to record summary
 logger = logging.getLogger(__name__)
 logger.setLevel(level = logging.INFO)
 class MyFormatter(logging.Formatter):
@@ -328,9 +213,9 @@ logger.info('seq_len', args.seq_len)
 logger.info('horizon', args.horizon)
 logger.info('input_dim', args.input_dim)
 logger.info('output_dim', args.output_dim)
-logger.info('embed_dim', args.embed_dim)
-logger.info('num_rnn_layers', args.num_rnn_layers)
+logger.info('rnn_layers', args.rnn_layers)
 logger.info('rnn_units', args.rnn_units)
+logger.info('embed_dim', args.embed_dim)
 logger.info('max_diffusion_step', args.max_diffusion_step)
 logger.info('loss', args.loss)
 logger.info('batch_size', args.batch_size)
@@ -342,16 +227,6 @@ logger.info('steps', args.steps)
 logger.info('lr_decay_ratio', args.lr_decay_ratio)
 logger.info('use_curriculum_learning', args.use_curriculum_learning)
 logger.info('cl_decay_steps', args.cl_decay_steps)
-# TODO: print new hyper-parameters
-logger.info('delta', args.delta)
-logger.info('temp', args.temp)
-logger.info('lam', args.lam)
-logger.info('fn_t', args.fn_t)
-logger.info('top_k', args.top_k)
-logger.info('fusion_num', args.fusion_num)
-logger.info('input_masking_ratio', args.im_t)
-logger.info('backbone_schema', args.schema)
-logger.info('contra_denominator', args.contra_denominator)
 
 cpu_num = 1
 os.environ ['OMP_NUM_THREADS'] = str(cpu_num)
@@ -360,8 +235,11 @@ os.environ ['MKL_NUM_THREADS'] = str(cpu_num)
 os.environ ['VECLIB_MAXIMUM_THREADS'] = str(cpu_num)
 os.environ ['NUMEXPR_NUM_THREADS'] = str(cpu_num)
 torch.set_num_threads(cpu_num)
-set_seed(args.seed)
 device = torch.device("cuda:{}".format(args.gpu)) if torch.cuda.is_available() else torch.device("cpu")
+# Please comment the following three lines for running experiments multiple times.
+np.random.seed(args.seed)
+torch.manual_seed(args.seed)
+if torch.cuda.is_available(): torch.cuda.manual_seed(args.seed)
 #####################################################################################################
 
 data = {}

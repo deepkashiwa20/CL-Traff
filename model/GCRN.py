@@ -1,8 +1,8 @@
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
+import math
 import numpy as np
-from utils import load_pickle, sym_adj
 
 class GCN(nn.Module):
     def __init__(self, dim_in, dim_out, cheb_k):
@@ -50,24 +50,24 @@ class GCRNCell(nn.Module):
         return torch.zeros(batch_size, self.node_num, self.hidden_dim)
     
 class GCRNN_Encoder(nn.Module):
-    def __init__(self, node_num, dim_in, dim_out, cheb_k, num_layers):
+    def __init__(self, node_num, dim_in, dim_out, cheb_k, rnn_layers):
         super(GCRNN_Encoder, self).__init__()
-        assert num_layers >= 1, 'At least one GCRNN layer in the Encoder.'
+        assert rnn_layers >= 1, 'At least one GCRNN layer in the Encoder.'
         self.node_num = node_num
         self.input_dim = dim_in
-        self.num_layers = num_layers
+        self.rnn_layers = rnn_layers
         self.gcrnn_cells = nn.ModuleList()
         self.gcrnn_cells.append(GCRNCell(node_num, dim_in, dim_out, cheb_k))
-        for _ in range(1, num_layers):
+        for _ in range(1, rnn_layers):
             self.gcrnn_cells.append(GCRNCell(node_num, dim_out, dim_out, cheb_k))
 
     def forward(self, x, init_state, support):
-        #shape of x: (B, T, N, D), shape of init_state: (num_layers, B, N, hidden_dim)
+        #shape of x: (B, T, N, D), shape of init_state: (rnn_layers, B, N, hidden_dim)
         assert x.shape[2] == self.node_num and x.shape[3] == self.input_dim
         seq_length = x.shape[1]
         current_inputs = x
         output_hidden = []
-        for i in range(self.num_layers):
+        for i in range(self.rnn_layers):
             state = init_state[i]
             inner_states = []
             for t in range(seq_length):
@@ -76,36 +76,36 @@ class GCRNN_Encoder(nn.Module):
             output_hidden.append(state)
             current_inputs = torch.stack(inner_states, dim=1)
         #current_inputs: the outputs of last layer: (B, T, N, hidden_dim)
-        #output_hidden: the last state for each layer: (num_layers, B, N, hidden_dim)
+        #output_hidden: the last state for each layer: (rnn_layers, B, N, hidden_dim)
         #last_state: (B, N, hidden_dim)
         # return current_inputs, torch.stack(output_hidden, dim=0)
         return current_inputs, output_hidden
     
     def init_hidden(self, batch_size):
         init_states = []
-        for i in range(self.num_layers):
+        for i in range(self.rnn_layers):
             init_states.append(self.gcrnn_cells[i].init_hidden_state(batch_size))
         return init_states
 
 class GCRNN_Decoder(nn.Module):
-    def __init__(self, node_num, dim_in, dim_out, cheb_k, num_layers):
+    def __init__(self, node_num, dim_in, dim_out, cheb_k, rnn_layers):
         super(GCRNN_Decoder, self).__init__()
-        assert num_layers >= 1, 'At least one GCRNN layer in the Decoder.'
+        assert rnn_layers >= 1, 'At least one GCRNN layer in the Decoder.'
         self.node_num = node_num
         self.input_dim = dim_in
-        self.num_layers = num_layers
+        self.rnn_layers = rnn_layers
         self.gcrnn_cells = nn.ModuleList()
         self.gcrnn_cells.append(GCRNCell(node_num, dim_in, dim_out, cheb_k))
-        for _ in range(1, num_layers):
+        for _ in range(1, rnn_layers):
             self.gcrnn_cells.append(GCRNCell(node_num, dim_out, dim_out, cheb_k))
 
     def forward(self, xt, init_state, support):
         # xt: (B, N, D)
-        # init_state: (num_layers, B, N, hidden_dim)
+        # init_state: (rnn_layers, B, N, hidden_dim)
         assert xt.shape[1] == self.node_num and xt.shape[2] == self.input_dim
         current_inputs = xt
         output_hidden = []
-        for i in range(self.num_layers):
+        for i in range(self.rnn_layers):
             state = self.gcrnn_cells[i](current_inputs, init_state[i], support)
             output_hidden.append(state)
             current_inputs = state
@@ -113,129 +113,42 @@ class GCRNN_Decoder(nn.Module):
 
 
 class GCRN(nn.Module):
-    def __init__(self, num_nodes, input_dim, output_dim, horizon, rnn_units, num_layers=1, embed_dim=8, cheb_k=3, ycov_dim=1, cl_decay_steps=2000, use_curriculum_learning=True, delta=0.1, input_masking_ratio=0.01, fusion_num=1, schema=1, device="cpu"):
+    def __init__(self, num_nodes, input_dim, output_dim, horizon, rnn_units, rnn_layers=1, embed_dim=8, cheb_k=3, ycov_dim=1, cl_decay_steps=2000, use_curriculum_learning=True):
         super(GCRN, self).__init__()
         self.num_nodes = num_nodes
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.horizon = horizon
-        self.num_layers = num_layers
+        self.rnn_layers = rnn_layers
         self.embed_dim = embed_dim
         self.cheb_k = cheb_k
         self.rnn_units = rnn_units
-        self.num_layers = num_layers
+        self.rnn_layers = rnn_layers
         self.ycov_dim = ycov_dim
         self.decoder_dim = self.rnn_units
         self.cl_decay_steps = cl_decay_steps
         self.use_curriculum_learning = use_curriculum_learning
-        # TODO: support contrastive learning
-        self.delta = delta
-        # self.fn_t = fn_t
-        # self.temp = temp
-        # self.top_k = top_k
-        # self.contra_denominator = contra_denominator
-        self.device = device
-        self.im_t = input_masking_ratio
-        self.fusion_num = fusion_num
-        self.schema = schema
         
         # graph
         self.node_embeddings = nn.Parameter(torch.randn(self.num_nodes, self.embed_dim), requires_grad=True)
         
         # encoder
-        self.encoder = GCRNN_Encoder(self.num_nodes, self.input_dim, self.rnn_units, self.cheb_k, self.num_layers)
+        self.encoder = GCRNN_Encoder(self.num_nodes, self.input_dim, self.rnn_units, self.cheb_k, self.rnn_layers)
         
-        # TODO: support different augmentation schemas
-        #* schema 1: two different encoders
-        if self.schema in [1, 3]:
-            self.encoder_aug = GCRNN_Encoder(self.num_nodes, self.input_dim, self.rnn_units, self.cheb_k, self.num_layers)
-        
-        #* schema 2: only one encoder but with two different MLP encoders
-        if self.schema == 2: 
-            self.fc_aug1_mean = nn.Sequential(
-                    nn.Linear(self.decoder_dim, self.decoder_dim),
-                    nn.ReLU(),
-                    nn.Linear(self.decoder_dim, self.decoder_dim),
-                )
-            self.fc_aug1_var = nn.Sequential(
-                    nn.Linear(self.decoder_dim, self.decoder_dim),
-                    nn.ReLU(),
-                    nn.Linear(self.decoder_dim, self.decoder_dim),
-                )
-            self.fc_aug2_mean = nn.Sequential(
-                    nn.Linear(self.decoder_dim, self.decoder_dim),
-                    nn.ReLU(),
-                    nn.Linear(self.decoder_dim, self.decoder_dim),
-                )
-            self.fc_aug2_var = nn.Sequential(
-                    nn.Linear(self.decoder_dim, self.decoder_dim),
-                    nn.ReLU(),
-                    nn.Linear(self.decoder_dim, self.decoder_dim),
-                )
-        #* schema 3: two different encoders but with fused representations for decoder (fusion is worse)
-        if self.schema == 3:
-            if self.fusion_num == 1:
-                self.fusion_layer = nn.Sequential(
-                    nn.Linear(self.decoder_dim * 2, self.decoder_dim),
-                )
-            else:
-                self.fusion_layer = nn.Sequential(
-                    nn.Linear(self.decoder_dim * 2, self.decoder_dim),
-                    nn.ReLU(),
-                    nn.Linear(self.decoder_dim, self.decoder_dim),
-                )
         # deocoder
-        self.decoder = GCRNN_Decoder(self.num_nodes, self.output_dim + self.ycov_dim, self.decoder_dim, self.cheb_k, self.num_layers)
+        self.decoder = GCRNN_Decoder(self.num_nodes, self.output_dim + self.ycov_dim, self.decoder_dim, self.cheb_k, self.rnn_layers)
         self.proj = nn.Sequential(nn.Linear(self.decoder_dim, self.output_dim))
     
     def compute_sampling_threshold(self, batches_seen):
         return self.cl_decay_steps / (self.cl_decay_steps + np.exp(batches_seen / self.cl_decay_steps))
     
-    def sampling(self, mu, log_var):
-        std = torch.exp(0.5*log_var)
-        eps = torch.randn_like(std)
-        return eps.mul(std).add_(mu) # return z sample
-    
-    def forward(self, x, x_his, y_cov, labels=None, batches_seen=None):
+    def forward(self, x, y_cov, labels=None, batches_seen=None):
         support = F.softmax(F.relu(torch.mm(self.node_embeddings, self.node_embeddings.transpose(0, 1))), dim=1)
         
         init_state = self.encoder.init_hidden(x.shape[0])
         h_en, state_en = self.encoder(x, init_state, support) # B, T, N, hidden      
         h_t = h_en[:, -1, :, :]   # B, N, hidden (last state)        
-        ht_list = [h_t]*self.num_layers
-        
-        # TODO: support different augmentation schemas
-        #* two encoders
-        if labels is not None and self.schema in [1, 3]:
-            init_state_aug = self.encoder_aug.init_hidden(x.shape[0])
-            h_en_aug, state_en_aug = self.encoder_aug(x, init_state_aug, support) # B, T, N, hidden      
-            h_t_aug = h_en_aug[:, -1, :, :]   # B, N, hidden (last state)
-        
-        #* one encoder with extra two mlp encoders
-        if labels is not None and self.schema == 2:
-            h_t_aug = self.sampling(self.fc_aug1_mean(h_t), self.fc_aug1_var(h_t))
-            h_t = self.sampling(self.fc_aug2_mean(h_t), self.fc_aug2_var(h_t))
-        
-        #* fusion for decoder
-        if labels is not None and self.schema == 3:  
-            ht_list_aug = [h_t_aug]*self.num_layers
-            ht_list = [self.fusion_layer(torch.cat(ht_list + ht_list_aug, dim=-1))]*self.num_layers
-        
-        #* one encoder with input data augmentation
-        if labels is not None and self.schema == 4:
-            x_ = x.detach().clone()
-            bs, frame, num_node, _ = x.size()
-            rand = torch.rand(bs, frame, num_node).to(self.device)
-            x_[:,:,:,0] = x_[:,:,:,0] * (rand >= self.im_t)
-            init_state_aug = self.encoder.init_hidden(x_.shape[0])
-            h_en_aug, state_en_aug = self.encoder(x_, init_state_aug, support) # B, T, N, hidden      
-            h_t_aug = h_en_aug[:, -1, :, :]   # B, N, hidden (last state) 
-        
-        if labels is not None and self.schema == 5:
-            init_state_aug = self.encoder.init_hidden(x.shape[0])
-            h_en_aug, _ = self.encoder(x_his, init_state_aug, support) # B, T, N, hidden the same encoder
-            h_t_aug = h_en_aug[:, -1, :, :]   # B, N, hidden (last state)
-            # [todo] self.delta is used to discriminate normal and abnormal 
+        ht_list = [h_t]*self.rnn_layers
             
         go = torch.zeros((x.shape[0], self.num_nodes, self.output_dim), device=x.device)
         out = []
@@ -248,12 +161,7 @@ class GCRN(nn.Module):
                 if c < self.compute_sampling_threshold(batches_seen):
                     go = labels[:, t, ...]
         output = torch.stack(out, dim=1)
-        
-        # TODO self-supervised contrastive learning
-        if labels is not None and self.schema in [1, 2, 3, 4, 5]:
-            # u_loss = self.get_unsupervised_loss(x_cov, h_t, h_t_aug, support)
-            return output, h_t, h_t_aug, support
-        return output, None, None, None
+        return output
 
 def print_params(model):
     # print trainable params
@@ -271,18 +179,19 @@ def main():
     import argparse
     from torchsummary import summary
     parser = argparse.ArgumentParser()
-    parser.add_argument("--gpu", type=int, default=0, help="which GPU to use")
+    parser.add_argument("--gpu", type=int, default=3, help="which GPU to use")
     parser.add_argument('--num_nodes', type=int, default=207, help='number of variables (e.g., 207 in METR-LA, 325 in PEMS-BAY)')
     parser.add_argument('--seq_len', type=int, default=12, help='sequence length of historical observation')
     parser.add_argument('--horizon', type=int, default=12, help='sequence length of prediction')
     parser.add_argument('--input_dim', type=int, default=1, help='number of input channel')
     parser.add_argument('--output_dim', type=int, default=1, help='number of output channel')
     parser.add_argument('--rnn_units', type=int, default=64, help='number of hidden units')
+    # parser.add_argument('--rnn_layers', type=int, default=1, help='number of rnn layers')
     args = parser.parse_args()
     device = torch.device("cuda:{}".format(args.gpu)) if torch.cuda.is_available() else torch.device("cpu")
     model = GCRN(num_nodes=args.num_nodes, input_dim=args.input_dim, output_dim=args.output_dim, 
                  horizon=args.horizon, rnn_units=args.rnn_units).to(device)
-    summary(model, [(args.seq_len, args.num_nodes, args.input_dim), (args.seq_len, args.num_nodes, args.input_dim), (args.horizon, args.num_nodes, args.output_dim)], device=device)
+    summary(model, [(args.seq_len, args.num_nodes, args.input_dim), (args.horizon, args.num_nodes, args.output_dim)], device=device)
     print_params(model)
         
 if __name__ == '__main__':
