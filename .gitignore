@@ -1,7 +1,6 @@
-save
 *.npz
+*.pt
 visualizations/results
-scripts
 model/GCRN_old.py
 model/traintest+_GCRN_old.py
 model/traintest_GCRN_old.py
