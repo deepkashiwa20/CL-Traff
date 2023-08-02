@@ -115,7 +115,8 @@ class GCRNN_Decoder(nn.Module):
 
 class MemGCRN(nn.Module):
     def __init__(self, num_nodes, input_dim, output_dim, horizon, rnn_units, rnn_layers=1, embed_dim=8, cheb_k=3,
-                 ycov_dim=1, mem_num=20, mem_dim=64, cl_decay_steps=2000, use_curriculum_learning=True):
+                 ycov_dim=1, mem_num=20, mem_dim=64, cl_decay_steps=2000, use_curriculum_learning=True,
+                 delta=10., contra_denominator=True, method="SCL", scaler=None):
         super(MemGCRN, self).__init__()
         self.num_nodes = num_nodes
         self.input_dim = input_dim
@@ -128,6 +129,10 @@ class MemGCRN(nn.Module):
         self.ycov_dim = ycov_dim
         self.cl_decay_steps = cl_decay_steps
         self.use_curriculum_learning = use_curriculum_learning
+        # TODO: add more parameters for supervised contrastive learning
+        self.delta = delta
+        self.method = method
+        self.scaler = scaler
         
         # memory
         self.mem_num = mem_num
@@ -163,16 +168,26 @@ class MemGCRN(nn.Module):
         att_score = torch.softmax(torch.matmul(query, self.memory['Memory'].t()), dim=-1)         # alpha: (B, N, M)
         value = torch.matmul(att_score, self.memory['Memory'])     # (B, N, d)
         _, ind = torch.topk(att_score, k=2, dim=-1)
-        pos = self.memory['Memory'][ind[:, :, 0]] # B, N, d
-        neg = self.memory['Memory'][ind[:, :, 1]] # B, N, d
-        return value, query, pos, neg
+        if self.method == "baseline":
+            pos = self.memory['Memory'][ind[:, :, 0]] # B, N, d
+            neg = self.memory['Memory'][ind[:, :, 1]] # B, N, d
+            mask = None
+        elif self.method == "SCL":
+            pos = self.memory['Memory'][ind[:, :, 0]] # B, N, d
+            neg = self.memory['Memory'].repeat(query.shape[0], self.num_nodes, 1, 1)  # (B, N, M, d)
+            mask_index = ind[:, :, [0]]  # B, N, 1
+            mask = torch.ones_like(att_score, dtype=torch.bool).to(att_score.device)  # B, N, M
+            mask = mask.scatter(-1, mask_index, False)
+        else:
+            raise NotImplementedError
+        return value, query, pos, neg, mask
             
-    def forward(self, x, y_cov, labels=None, batches_seen=None):
+    def forward(self, x, y_cov, labels=None, x_cov=None, x_his=None, y_his=None, batches_seen=None):
         init_state = self.encoder.init_hidden(x.shape[0])
         h_en, state_en = self.encoder(x, init_state, self.node_embeddings) # B, T, N, hidden
         h_t = h_en[:, -1, :, :] # B, N, hidden (last state)        
         
-        h_att, query, pos, neg = self.query_memory(h_t)
+        h_att, query, pos, neg, mask = self.query_memory(h_t)
         h_t = torch.cat([h_t, h_att], dim=-1)
         
         ht_list = [h_t]*self.rnn_layers
@@ -188,7 +203,7 @@ class MemGCRN(nn.Module):
                     go = labels[:, t, ...]
         output = torch.stack(out, dim=1)
         
-        return output, h_att, query, pos, neg
+        return output, h_att, query, pos, neg, mask
 
 def print_params(model):
     # print trainable params

@@ -14,6 +14,29 @@ import logging
 from utils import StandardScaler, DataLoader, masked_mae_loss, masked_mape_loss, masked_mse_loss, masked_rmse_loss
 from MemGCRN import MemGCRN
 
+class InfoNCELoss(nn.Module):
+    def __init__(self, temp=0.5, contra_denominator=True):
+        super().__init__()
+        self.temp = temp
+        self.contra_denominator = contra_denominator
+    
+    def forward(self, pos_rep, neg_rep, mask):
+        """
+            pos: (B, N, D)
+            neg: (B, N, M, D)
+            mask: (B, N, M), where 0 means positive indices, 1 means negative indices
+            return: InfoNCE loss, i.e., unsupervised contrastive loss
+        """
+        sim_score = torch.exp(F.cosine_similarity(pos_rep.unsqueeze(2), neg_rep, dim=-1) / self.temp)  # B, N, M
+        pos_score = torch.sum(~mask * sim_score, dim=-1)  # B, N
+        neg_score = torch.sum(mask * sim_score, dim=-1)  # B, N
+        if self.contra_denominator:
+            ratio = pos_score / (pos_score + neg_score)  # B, N
+        else:
+            ratio = pos_score / neg_score 
+        return torch.mean(-torch.log(ratio))
+        
+    
 def print_model(model):
     param_count = 0
     logger.info('Trainable parameter list:')
@@ -27,7 +50,8 @@ def print_model(model):
 def get_model():  
     model = MemGCRN(num_nodes=args.num_nodes, input_dim=args.input_dim, output_dim=args.output_dim, horizon=args.horizon, 
                  rnn_units=args.rnn_units, rnn_layers=args.rnn_layers, embed_dim=args.embed_dim, cheb_k=args.max_diffusion_step, 
-                 mem_num=args.mem_num, mem_dim=args.mem_dim, cl_decay_steps=args.cl_decay_steps, use_curriculum_learning=args.use_curriculum_learning).to(device)
+                 mem_num=args.mem_num, mem_dim=args.mem_dim, cl_decay_steps=args.cl_decay_steps, use_curriculum_learning=args.use_curriculum_learning,
+                 delta=args.delta, method=args.method, contra_denominator=args.contra_denominator, scaler=None).to(device)
     return model
 
 def prepare_x_y(x, y):
@@ -39,13 +63,19 @@ def prepare_x_y(x, y):
     :return2: x: shape (seq_len, batch_size, num_sensor * input_dim)
               y: shape (horizon, batch_size, num_sensor * output_dim)
     """
-    x0 = x[..., :args.input_dim]
-    y0 = y[..., :args.output_dim]
-    y1 = y[..., args.output_dim:]
+    x0 = x[..., 0:1]  # speed
+    x1 = x[..., 1:2]  # weekdaytime 
+    x2 = x[..., 2:3]  # history_speed
+    y0 = y[..., 0:1]
+    y1 = y[..., 1:2]
+    y2 = y[..., 2:3]
     x0 = torch.from_numpy(x0).float()
+    x1 = torch.from_numpy(x1).float()
+    x2 = torch.from_numpy(x2).float()
     y0 = torch.from_numpy(y0).float()
     y1 = torch.from_numpy(y1).float()
-    return x0.to(device), y0.to(device), y1.to(device) # x, y, y_cov
+    y2 = torch.from_numpy(y2).float()
+    return x0.to(device), x1.to(device), x2.to(device), y0.to(device), y1.to(device), y2.to(device) # x, x_cov, x_his, y, y_cov, y_his
     
 def evaluate(model, mode):
     with torch.no_grad():
@@ -53,14 +83,24 @@ def evaluate(model, mode):
         data_iter =  data[f'{mode}_loader'].get_iterator()
         losses, ys_true, ys_pred = [], [], []
         for x, y in data_iter:
-            x, y, ycov = prepare_x_y(x, y)
-            output, h_att, query, pos, neg = model(x, ycov)
+            x, x_cov, x_his, y, y_cov, y_his = prepare_x_y(x, y)
+            output, h_att, query, pos, neg, mask = model(x, y_cov, x_cov, x_his, y_his)
             y_pred = scaler.inverse_transform(output)
             y_true = scaler.inverse_transform(y)
             loss1 = masked_mae_loss(y_pred, y_true) # masked_mae_loss(y_pred, y_true)
-            separate_loss = nn.TripletMarginLoss(margin=1.0)
+            if args.method == "baseline":
+                separate_loss = nn.TripletMarginLoss(margin=1.0)
+            elif args.method == "SCL":
+                separate_loss = InfoNCELoss(temp=args.temp, contra_denominator=args.contra_denominator)
+            else:
+                pass
             compact_loss = nn.MSELoss()
-            loss2 = separate_loss(query, pos.detach(), neg.detach())
+            if args.method == "baseline":
+                loss2 = separate_loss(query, pos.detach(), neg.detach())
+            elif args.method == "SCL":
+                loss2 = separate_loss(pos.detach(), neg.detach(), mask.detach())
+            else:
+                pass 
             loss3 = compact_loss(query, pos.detach())
             loss = loss1 + args.lamb * loss2 + args.lamb1 * loss3
             losses.append(loss.item())
@@ -104,30 +144,46 @@ def traintest_model():
         start_time = time.time()
         model = model.train()
         data_iter = data['train_loader'].get_iterator()
-        losses = []
+        losses, mae_losses, contra_losses, compact_losses = [], [], [], []
         for x, y in data_iter:
             optimizer.zero_grad()
-            x, y, ycov = prepare_x_y(x, y)
-            output, h_att, query, pos, neg = model(x, ycov, y, batches_seen)
+            x, x_cov, x_his, y, y_cov, y_his = prepare_x_y(x, y)
+            output, h_att, query, pos, neg, mask = model(x, y_cov, y, x_cov, x_his, y_his, batches_seen)
             y_pred = scaler.inverse_transform(output)
             y_true = scaler.inverse_transform(y)
             loss1 = masked_mae_loss(y_pred, y_true)
-            separate_loss = nn.TripletMarginLoss(margin=1.0)
+            if args.method == "baseline":
+                separate_loss = nn.TripletMarginLoss(margin=1.0)
+            elif args.method == "SCL":
+                separate_loss = InfoNCELoss(temp=args.temp, contra_denominator=args.contra_denominator)
+            else:
+                pass
             compact_loss = nn.MSELoss()
-            loss2 = separate_loss(query, pos.detach(), neg.detach())
+            if args.method == "baseline":
+                loss2 = separate_loss(query, pos.detach(), neg.detach())
+            elif args.method == "SCL":
+                loss2 = separate_loss(pos.detach(), neg.detach(), mask.detach())
+            else:
+                pass 
             loss3 = compact_loss(query, pos.detach())
             loss = loss1 + args.lamb * loss2 + args.lamb1 * loss3
             losses.append(loss.item())
+            mae_losses.append(loss1.item())
+            contra_losses.append(loss2.item())
+            compact_losses.append(loss3.item())
             batches_seen += 1
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
             optimizer.step()
         train_loss = np.mean(losses)
+        train_mae_loss = np.mean(mae_losses)
+        train_contra_loss = np.mean(contra_losses)
+        train_compact_loss = np.mean(compact_losses)
         lr_scheduler.step()
         val_loss, _, _ = evaluate(model, 'val')
         end_time2 = time.time()
-        message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.1f}s'.format(epoch_num + 1, 
-                   args.epochs, batches_seen, train_loss, val_loss, optimizer.param_groups[0]['lr'], (end_time2 - start_time))
+        message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, train_mae_loss: {:.4f}, train_contra_loss: {:.4f}, train_compact_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.1f}s'.format(epoch_num + 1, 
+                   args.epochs, batches_seen, train_loss, train_mae_loss, train_contra_loss, train_compact_loss, val_loss, optimizer.param_groups[0]['lr'], (end_time2 - start_time))
         logger.info(message)
         test_loss, _, _ = evaluate(model, 'test')
         
@@ -177,7 +233,12 @@ parser.add_argument("--use_curriculum_learning", type=eval, choices=[True, False
 parser.add_argument("--cl_decay_steps", type=int, default=2000, help="cl_decay_steps")
 parser.add_argument('--test_every_n_epochs', type=int, default=5, help='test_every_n_epochs')
 parser.add_argument('--gpu', type=int, default=0, help='which gpu to use')
-parser.add_argument('--seed', type=int, default=100, help='random seed.')
+parser.add_argument('--seed', type=int, default=100, help='random seed')
+# TODO: add more arguments for supervised contrastive learning
+parser.add_argument('--delta', type=float, default=10.0, help='abnormal threshold')
+parser.add_argument('--method', type=str, choices=["baseline", "SCL"], default="SCL", help='whether to use baseline or supervised contrastive learning')
+parser.add_argument('--contra_denominator', action="store_false", help='abnormal threshold')
+parser.add_argument('--temp', type=float, default=0.1, help='temperature')
 args = parser.parse_args()
         
 if args.dataset == 'METRLA':
@@ -193,13 +254,13 @@ model_name = 'MemGCRN'
 timestring = time.strftime('%Y%m%d%H%M%S', time.localtime())
 path = f'../save/{args.dataset}_{model_name}_{timestring}'
 logging_path = f'{path}/{model_name}_{timestring}_logging.txt'
-score_path = f'{path}/{model_name}_{timestring}_scores.txt'
-epochlog_path = f'{path}/{model_name}_{timestring}_epochlog.txt'
+# score_path = f'{path}/{model_name}_{timestring}_scores.txt'
+# epochlog_path = f'{path}/{model_name}_{timestring}_epochlog.txt'
 modelpt_path = f'{path}/{model_name}_{timestring}.pt'
 if not os.path.exists(path): os.makedirs(path)
-shutil.copy2(sys.argv[0], path)
-shutil.copy2(f'{model_name}.py', path)
-shutil.copy2('utils.py', path)
+# shutil.copy2(sys.argv[0], path)
+# shutil.copy2(f'{model_name}.py', path)
+# shutil.copy2('utils.py', path)
     
 logger = logging.getLogger(__name__)
 logger.setLevel(level = logging.INFO)
@@ -245,6 +306,11 @@ logger.info('epsilon', args.epsilon)
 logger.info('steps', args.steps)
 logger.info('lr_decay_ratio', args.lr_decay_ratio)
 logger.info('use_curriculum_learning', args.use_curriculum_learning)
+# TODO: add more arguments for supervised contrastive learning
+logger.info('delta', args.delta)
+logger.info('method', args.method)
+logger.info('contra_denominator', args.contra_denominator)
+logger.info('temp', args.temp)
 
 cpu_num = 1
 os.environ ['OMP_NUM_THREADS'] = str(cpu_num)
