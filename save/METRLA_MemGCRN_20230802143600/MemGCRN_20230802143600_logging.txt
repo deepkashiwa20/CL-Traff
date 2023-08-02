@@ -359,3 +359,40 @@ Horizon overall: mae: 3.1599, mape: 0.0879, rmse: 6.4772
 Horizon 15mins: mae: 2.7659, mape: 0.0726, rmse: 5.3507 
 Horizon 30mins: mae: 3.1976, mape: 0.0894, rmse: 6.5198 
 Horizon 60mins: mae: 3.7095, mape: 0.1089, rmse: 7.7595 
+Epoch [66/200] (24750) train_loss: 2.6746, train_mae_loss: 2.6742, train_contra_loss: 0.0242, train_compact_loss: 0.0114, val_loss: 2.8218, lr: 0.001000, 57.4s 
+Horizon overall: mae: 3.1589, mape: 0.0875, rmse: 6.4967 
+Horizon 15mins: mae: 2.7658, mape: 0.0723, rmse: 5.3620 
+Horizon 30mins: mae: 3.1946, mape: 0.0887, rmse: 6.5335 
+Horizon 60mins: mae: 3.7106, mape: 0.1086, rmse: 7.7948 
+Epoch [67/200] (25125) train_loss: 2.6700, train_mae_loss: 2.6696, train_contra_loss: 0.0244, train_compact_loss: 0.0114, val_loss: 2.8234, lr: 0.001000, 57.0s 
+Horizon overall: mae: 3.1623, mape: 0.0881, rmse: 6.5031 
+Horizon 15mins: mae: 2.7656, mape: 0.0724, rmse: 5.3601 
+Horizon 30mins: mae: 3.1973, mape: 0.0893, rmse: 6.5372 
+Horizon 60mins: mae: 3.7178, mape: 0.1097, rmse: 7.8079 
+Epoch [68/200] (25500) train_loss: 2.6703, train_mae_loss: 2.6699, train_contra_loss: 0.0245, train_compact_loss: 0.0117, val_loss: 2.8239, lr: 0.001000, 57.3s 
+Horizon overall: mae: 3.1619, mape: 0.0871, rmse: 6.5031 
+Horizon 15mins: mae: 2.7666, mape: 0.0719, rmse: 5.3610 
+Horizon 30mins: mae: 3.1982, mape: 0.0883, rmse: 6.5403 
+Horizon 60mins: mae: 3.7170, mape: 0.1081, rmse: 7.8087 
+Epoch [69/200] (25875) train_loss: 2.6662, train_mae_loss: 2.6658, train_contra_loss: 0.0244, train_compact_loss: 0.0117, val_loss: 2.8243, lr: 0.001000, 61.0s 
+Horizon overall: mae: 3.1633, mape: 0.0874, rmse: 6.5029 
+Horizon 15mins: mae: 2.7670, mape: 0.0720, rmse: 5.3596 
+Horizon 30mins: mae: 3.2000, mape: 0.0886, rmse: 6.5398 
+Horizon 60mins: mae: 3.7189, mape: 0.1086, rmse: 7.8087 
+Epoch [70/200] (26250) train_loss: 2.6588, train_mae_loss: 2.6584, train_contra_loss: 0.0243, train_compact_loss: 0.0119, val_loss: 2.8272, lr: 0.001000, 57.9s 
+Horizon overall: mae: 3.1695, mape: 0.0885, rmse: 6.5354 
+Horizon 15mins: mae: 2.7678, mape: 0.0725, rmse: 5.3680 
+Horizon 30mins: mae: 3.2038, mape: 0.0896, rmse: 6.5652 
+Horizon 60mins: mae: 3.7319, mape: 0.1105, rmse: 7.8652 
+Epoch [71/200] (26625) train_loss: 2.6591, train_mae_loss: 2.6587, train_contra_loss: 0.0244, train_compact_loss: 0.0119, val_loss: 2.8299, lr: 0.001000, 57.3s 
+Horizon overall: mae: 3.1709, mape: 0.0886, rmse: 6.5270 
+Horizon 15mins: mae: 2.7700, mape: 0.0726, rmse: 5.3658 
+Horizon 30mins: mae: 3.2061, mape: 0.0898, rmse: 6.5574 
+Horizon 60mins: mae: 3.7337, mape: 0.1108, rmse: 7.8529 
+Early stopping at epoch: 70 
+===================================Best model performance=================================== 
+Horizon overall: mae: 3.1114, mape: 0.0845, rmse: 6.3458 
+Horizon 15mins: mae: 2.7418, mape: 0.0707, rmse: 5.2970 
+Horizon 30mins: mae: 3.1474, mape: 0.0856, rmse: 6.3824 
+Horizon 60mins: mae: 3.6350, mape: 0.1039, rmse: 7.5786 
+METRLA training and testing ended Wed Aug  2 15:54:48 2023

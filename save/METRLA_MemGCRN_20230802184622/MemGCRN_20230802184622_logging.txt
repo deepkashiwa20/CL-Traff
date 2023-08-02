@@ -1,0 +1,56 @@
+model MemGCRN
+dataset METRLA
+trainval_ratio 0.8
+val_ratio 0.125
+num_nodes 207
+seq_len 12
+horizon 12
+input_dim 1
+output_dim 1
+rnn_layers 1
+rnn_units 64
+embed_dim 8
+max_diffusion_step 3
+mem_num 20
+mem_dim 64
+loss mask_mae_loss
+separate loss lamb 0.01
+compact loss lamb1 0.01
+batch_size 64
+epochs 200
+patience 20
+lr 0.01
+epsilon 0.001
+steps [50, 100]
+lr_decay_ratio 0.1
+use_curriculum_learning True
+delta 10.0
+method SCL
+contra_denominator True
+temp 0.1
+METRLA training and testing started Wed Aug  2 18:46:45 2023
+train xs.shape, ys.shape (23974, 12, 207, 3) (23974, 12, 207, 3)
+val xs.shape, ys.shape (3425, 12, 207, 3) (3425, 12, 207, 3)
+test xs.shape, ys.shape (6850, 12, 207, 3) (6850, 12, 207, 3)
+Trainable parameter list: 
+In total: 194937 trainable parameters. 
+Epoch [1/200] (375) train_loss: 2.6393, train_mae_loss: 2.6389, train_contra_loss: 0.0023, train_compact_loss: 0.0372, val_loss: 3.7887, lr: 0.010000, 43.3s 
+Horizon overall: mae: 4.2503, mape: 0.1125, rmse: 8.5999 
+Horizon 15mins: mae: 3.3154, mape: 0.0850, rmse: 6.5817 
+Horizon 30mins: mae: 4.1817, mape: 0.1107, rmse: 8.4128 
+Horizon 60mins: mae: 5.6773, mape: 0.1544, rmse: 11.0313 
+Epoch [2/200] (750) train_loss: 2.3847, train_mae_loss: 2.3844, train_contra_loss: 0.0022, train_compact_loss: 0.0263, val_loss: 3.6978, lr: 0.010000, 43.4s 
+Horizon overall: mae: 4.1516, mape: 0.1078, rmse: 8.3860 
+Horizon 15mins: mae: 3.2283, mape: 0.0816, rmse: 6.3917 
+Horizon 30mins: mae: 4.0674, mape: 0.1058, rmse: 8.1528 
+Horizon 60mins: mae: 5.6012, mape: 0.1484, rmse: 10.8690 
+Epoch [3/200] (1125) train_loss: 2.3455, train_mae_loss: 2.3453, train_contra_loss: 0.0020, train_compact_loss: 0.0226, val_loss: 3.4176, lr: 0.010000, 43.5s 
+Horizon overall: mae: 3.8251, mape: 0.1026, rmse: 7.8346 
+Horizon 15mins: mae: 3.0911, mape: 0.0793, rmse: 6.1530 
+Horizon 30mins: mae: 3.7848, mape: 0.1014, rmse: 7.6886 
+Horizon 60mins: mae: 4.9501, mape: 0.1380, rmse: 9.9243 
+Epoch [4/200] (1500) train_loss: 2.3175, train_mae_loss: 2.3173, train_contra_loss: 0.0018, train_compact_loss: 0.0212, val_loss: 3.4209, lr: 0.010000, 58.7s 
+Horizon overall: mae: 3.8264, mape: 0.1027, rmse: 7.6879 
+Horizon 15mins: mae: 3.0756, mape: 0.0794, rmse: 6.0470 
+Horizon 30mins: mae: 3.7854, mape: 0.1017, rmse: 7.5716 
+Horizon 60mins: mae: 4.9703, mape: 0.1378, rmse: 9.6901 

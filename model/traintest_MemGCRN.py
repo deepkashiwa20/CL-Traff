@@ -98,7 +98,7 @@ def evaluate(model, mode):
             if args.method == "baseline":
                 loss2 = separate_loss(query, pos.detach(), neg.detach())
             elif args.method == "SCL":
-                loss2 = separate_loss(pos.detach(), neg.detach(), mask.detach())
+                loss2 = separate_loss(pos, neg, mask)
             else:
                 pass 
             loss3 = compact_loss(query, pos.detach())
@@ -162,7 +162,7 @@ def traintest_model():
             if args.method == "baseline":
                 loss2 = separate_loss(query, pos.detach(), neg.detach())
             elif args.method == "SCL":
-                loss2 = separate_loss(pos.detach(), neg.detach(), mask.detach())
+                loss2 = separate_loss(pos, neg, mask)
             else:
                 pass 
             loss3 = compact_loss(query, pos.detach())

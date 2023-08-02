@@ -14,7 +14,7 @@ max_diffusion_step 3
 mem_num 20
 mem_dim 64
 loss mask_mae_loss
-separate loss lamb 0.1
+separate loss lamb 0.01
 compact loss lamb1 0.01
 batch_size 64
 epochs 200
@@ -26,11 +26,16 @@ lr_decay_ratio 0.1
 use_curriculum_learning True
 delta 10.0
 method SCL
-contra_denominator False
-temp 0.1
-METRLA training and testing started Wed Aug  2 15:48:12 2023
+contra_denominator True
+temp 1.0
+METRLA training and testing started Wed Aug  2 18:49:29 2023
 train xs.shape, ys.shape (23974, 12, 207, 3) (23974, 12, 207, 3)
 val xs.shape, ys.shape (3425, 12, 207, 3) (3425, 12, 207, 3)
 test xs.shape, ys.shape (6850, 12, 207, 3) (6850, 12, 207, 3)
 Trainable parameter list: 
 In total: 194937 trainable parameters. 
+Epoch [1/200] (375) train_loss: 2.6584, train_mae_loss: 2.6376, train_contra_loss: 2.0379, train_compact_loss: 0.0403, val_loss: 3.7213, lr: 0.010000, 59.7s 
+Horizon overall: mae: 4.1423, mape: 0.1111, rmse: 8.3593 
+Horizon 15mins: mae: 3.2605, mape: 0.0844, rmse: 6.4801 
+Horizon 30mins: mae: 4.0772, mape: 0.1093, rmse: 8.2006 
+Horizon 60mins: mae: 5.4933, mape: 0.1518, rmse: 10.6448 
