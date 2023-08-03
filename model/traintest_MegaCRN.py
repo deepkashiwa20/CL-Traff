@@ -104,7 +104,7 @@ def traintest_model():
         start_time = time.time()
         model = model.train()
         data_iter = data['train_loader'].get_iterator()
-        losses = []
+        losses, mae_losses, contra_losses, compact_losses = [], [], [], []
         for x, y in data_iter:
             optimizer.zero_grad()
             x, y, ycov = prepare_x_y(x, y)
@@ -118,16 +118,22 @@ def traintest_model():
             loss3 = compact_loss(query, pos.detach())
             loss = loss1 + args.lamb * loss2 + args.lamb1 * loss3
             losses.append(loss.item())
+            mae_losses.append(loss1.item())
+            contra_losses.append(loss2.item())
+            compact_losses.append(loss3.item())
             batches_seen += 1
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
             optimizer.step()
         train_loss = np.mean(losses)
+        train_mae_loss = np.mean(mae_losses)
+        train_contra_loss = np.mean(contra_losses)
+        train_compact_loss = np.mean(compact_losses)
         lr_scheduler.step()
         val_loss, _, _ = evaluate(model, 'val')
         end_time2 = time.time()
-        message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.1f}s'.format(epoch_num + 1, 
-                   args.epochs, batches_seen, train_loss, val_loss, optimizer.param_groups[0]['lr'], (end_time2 - start_time))
+        message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, train_mae_loss: {:.4f}, train_contra_loss: {:.4f}, train_compact_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.1f}s'.format(epoch_num + 1, 
+                   args.epochs, batches_seen, train_loss, train_mae_loss, train_contra_loss, train_compact_loss, val_loss, optimizer.param_groups[0]['lr'], (end_time2 - start_time))
         logger.info(message)
         test_loss, _, _ = evaluate(model, 'test')
         
