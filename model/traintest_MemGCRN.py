@@ -84,7 +84,7 @@ def evaluate(model, mode):
         losses, ys_true, ys_pred = [], [], []
         for x, y in data_iter:
             x, x_cov, x_his, y, y_cov, y_his = prepare_x_y(x, y)
-            output, h_att, query, pos, neg, mask = model(x, y_cov, x_cov, x_his, y_his)
+            output, h_att, query, pos, neg, mask = model(x, y_cov, x_cov=x_cov, x_his=x_his, y_his=y_his)
             y_pred = scaler.inverse_transform(output)
             y_true = scaler.inverse_transform(y)
             loss1 = masked_mae_loss(y_pred, y_true)
@@ -144,7 +144,7 @@ def traintest_model():
         for x, y in data_iter:
             optimizer.zero_grad()
             x, x_cov, x_his, y, y_cov, y_his = prepare_x_y(x, y)
-            output, h_att, query, pos, neg, mask = model(x, y_cov, y, x_cov, x_his, y_his, batches_seen)
+            output, h_att, query, pos, neg, mask = model(x, y_cov, y, x_cov=x_cov, x_his=x_his, y_his=y_his, batches_seen=batches_seen)
             y_pred = scaler.inverse_transform(output)
             y_true = scaler.inverse_transform(y)
             loss1 = masked_mae_loss(y_pred, y_true)
