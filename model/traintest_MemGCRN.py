@@ -87,20 +87,16 @@ def evaluate(model, mode):
             output, h_att, query, pos, neg, mask = model(x, y_cov, x_cov, x_his, y_his)
             y_pred = scaler.inverse_transform(output)
             y_true = scaler.inverse_transform(y)
-            loss1 = masked_mae_loss(y_pred, y_true) # masked_mae_loss(y_pred, y_true)
+            loss1 = masked_mae_loss(y_pred, y_true)
             if args.method == "baseline":
                 separate_loss = nn.TripletMarginLoss(margin=1.0)
+                loss2 = separate_loss(query, pos.detach(), neg.detach())
             elif args.method == "SCL":
                 separate_loss = InfoNCELoss(temp=args.temp, contra_denominator=args.contra_denominator)
+                loss2 = separate_loss(pos, neg, mask)
             else:
                 pass
             compact_loss = nn.MSELoss()
-            if args.method == "baseline":
-                loss2 = separate_loss(query, pos.detach(), neg.detach())
-            elif args.method == "SCL":
-                loss2 = separate_loss(pos, neg, mask)
-            else:
-                pass 
             loss3 = compact_loss(query, pos.detach())
             loss = loss1 + args.lamb * loss2 + args.lamb1 * loss3
             losses.append(loss.item())
@@ -154,17 +150,13 @@ def traintest_model():
             loss1 = masked_mae_loss(y_pred, y_true)
             if args.method == "baseline":
                 separate_loss = nn.TripletMarginLoss(margin=1.0)
+                loss2 = separate_loss(query, pos.detach(), neg.detach())
             elif args.method == "SCL":
                 separate_loss = InfoNCELoss(temp=args.temp, contra_denominator=args.contra_denominator)
+                loss2 = separate_loss(pos, neg, mask)
             else:
                 pass
             compact_loss = nn.MSELoss()
-            if args.method == "baseline":
-                loss2 = separate_loss(query, pos.detach(), neg.detach())
-            elif args.method == "SCL":
-                loss2 = separate_loss(pos, neg, mask)
-            else:
-                pass 
             loss3 = compact_loss(query, pos.detach())
             loss = loss1 + args.lamb * loss2 + args.lamb1 * loss3
             losses.append(loss.item())
