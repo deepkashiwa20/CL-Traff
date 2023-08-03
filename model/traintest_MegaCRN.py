@@ -26,8 +26,8 @@ def print_model(model):
 
 def get_model():  
     model = MegaCRN(num_nodes=args.num_nodes, input_dim=args.input_dim, output_dim=args.output_dim, horizon=args.horizon, 
-                 rnn_units=args.rnn_units, rnn_layers=args.rnn_layers, cheb_k=args.max_diffusion_step, 
-                 mem_num=args.mem_num, mem_dim=args.mem_dim, cl_decay_steps=args.cl_decay_steps, use_curriculum_learning=args.use_curriculum_learning).to(device)
+                    rnn_units=args.rnn_units, rnn_layers=args.num_rnn_layers, mem_num=args.mem_num, mem_dim=args.mem_dim, 
+                    cheb_k = args.max_diffusion_step, cl_decay_steps=args.cl_decay_steps, use_curriculum_learning=args.use_curriculum_learning).to(device)
     return model
 
 def prepare_x_y(x, y):
@@ -39,9 +39,9 @@ def prepare_x_y(x, y):
     :return2: x: shape (seq_len, batch_size, num_sensor * input_dim)
               y: shape (horizon, batch_size, num_sensor * output_dim)
     """
-    x0 = x[..., :args.input_dim]
-    y0 = y[..., :args.output_dim]
-    y1 = y[..., args.output_dim:]
+    x0 = x[..., 0:1]
+    y0 = y[..., 0:1]
+    y1 = y[..., 1:2]
     x0 = torch.from_numpy(x0).float()
     y0 = torch.from_numpy(y0).float()
     y1 = torch.from_numpy(y1).float()
@@ -104,7 +104,7 @@ def traintest_model():
         start_time = time.time()
         model = model.train()
         data_iter = data['train_loader'].get_iterator()
-        losses = []
+        losses, mae_losses, contra_losses, compact_losses = [], [], [], []
         for x, y in data_iter:
             optimizer.zero_grad()
             x, y, ycov = prepare_x_y(x, y)
@@ -118,16 +118,22 @@ def traintest_model():
             loss3 = compact_loss(query, pos.detach())
             loss = loss1 + args.lamb * loss2 + args.lamb1 * loss3
             losses.append(loss.item())
+            mae_losses.append(loss1.item())
+            contra_losses.append(loss2.item())
+            compact_losses.append(loss3.item())
             batches_seen += 1
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
             optimizer.step()
         train_loss = np.mean(losses)
+        train_mae_loss = np.mean(mae_losses)
+        train_contra_loss = np.mean(contra_losses)
+        train_compact_loss = np.mean(compact_losses)
         lr_scheduler.step()
         val_loss, _, _ = evaluate(model, 'val')
         end_time2 = time.time()
-        message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.1f}s'.format(epoch_num + 1, 
-                   args.epochs, batches_seen, train_loss, val_loss, optimizer.param_groups[0]['lr'], (end_time2 - start_time))
+        message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, train_mae_loss: {:.4f}, train_contra_loss: {:.4f}, train_compact_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.1f}s'.format(epoch_num + 1, 
+                   args.epochs, batches_seen, train_loss, train_mae_loss, train_contra_loss, train_compact_loss, val_loss, optimizer.param_groups[0]['lr'], (end_time2 - start_time))
         logger.info(message)
         test_loss, _, _ = evaluate(model, 'test')
         
@@ -157,7 +163,7 @@ parser.add_argument('--horizon', type=int, default=12, help='output sequence len
 parser.add_argument('--input_dim', type=int, default=1, help='number of input channel')
 parser.add_argument('--output_dim', type=int, default=1, help='number of output channel')
 parser.add_argument('--max_diffusion_step', type=int, default=3, help='max diffusion step or Cheb K')
-parser.add_argument('--rnn_layers', type=int, default=1, help='number of rnn layers')
+parser.add_argument('--num_rnn_layers', type=int, default=1, help='number of rnn layers')
 parser.add_argument('--rnn_units', type=int, default=64, help='number of rnn units')
 parser.add_argument('--mem_num', type=int, default=20, help='number of meta-nodes/prototypes')
 parser.add_argument('--mem_dim', type=int, default=64, help='dimension of meta-nodes/prototypes')
@@ -227,7 +233,7 @@ logger.info('seq_len', args.seq_len)
 logger.info('horizon', args.horizon)
 logger.info('input_dim', args.input_dim)
 logger.info('output_dim', args.output_dim)
-logger.info('rnn_layers', args.rnn_layers)
+logger.info('num_rnn_layers', args.num_rnn_layers)
 logger.info('rnn_units', args.rnn_units)
 logger.info('max_diffusion_step', args.max_diffusion_step)
 logger.info('mem_num', args.mem_num)
