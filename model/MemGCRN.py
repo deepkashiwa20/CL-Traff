@@ -146,7 +146,7 @@ class MemGCRN(nn.Module):
         self.encoder = GCRNN_Encoder(self.num_nodes, self.input_dim, self.rnn_units, self.cheb_k, self.rnn_layers)
         
         # deocoder
-        self.decoder_dim = self.rnn_units + self.mem_dim
+        self.decoder_dim = self.rnn_units + self.mem_dim * 2
         self.decoder = GCRNN_Decoder(self.num_nodes, self.output_dim + self.ycov_dim, self.decoder_dim, self.cheb_k, self.rnn_layers)
 
         # output
@@ -185,11 +185,9 @@ class MemGCRN(nn.Module):
         if self.method == "baseline":
             normal_pos = self.memory['Memory'][normal_ind[:, :, 0]] # B, N, d
             normal_neg = self.memory['Memory'][normal_ind[:, :, 1]] # B, N, d
-            normal_mask = None
             
             abnormal_pos = self.memory['Memory_abnormal'][abnormal_ind[:, :, 0]] # B, N, d
             abnormal_neg = self.memory['Memory_abnormal'][abnormal_ind[:, :, 1]] # B, N, d
-            abnormal_mask = None
         elif self.method == "SCL":
             normal_pos = self.memory['Memory'][normal_ind[:, :, 0]] # B, N, d
             normal_neg = self.memory['Memory'].repeat(query.shape[0], self.num_nodes, 1, 1)  # (B, N, M, d)
@@ -208,7 +206,12 @@ class MemGCRN(nn.Module):
         query = torch.cat([normal_query, abnormal_query], dim=0)  # 2*B, N, d
         pos = torch.cat([normal_pos, abnormal_pos], dim=0) # 2*B, N, d
         neg = torch.cat([normal_neg, abnormal_neg], dim=0)
-        mask = torch.cat([normal_mask, abnormal_mask], dim=0) # 2*B, N, M
+        if self.method == "baseline":
+            mask = None
+        elif self.method == "SCL":
+            mask = torch.cat([normal_mask, abnormal_mask], dim=0) # 2*B, N, M
+        else:
+            pass
         return value, query, pos, neg, mask
             
     def forward(self, x, y_cov, labels=None, x_cov=None, x_his=None, y_his=None, batches_seen=None):
