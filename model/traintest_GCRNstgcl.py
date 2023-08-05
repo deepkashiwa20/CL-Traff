@@ -12,31 +12,9 @@ from torchsummary import summary
 import argparse
 import logging
 from utils import StandardScaler, DataLoader, masked_mae_loss, masked_mape_loss, masked_mse_loss, masked_rmse_loss
-from MemGCRN import MemGCRN
+from GCRN import GCRN
+from torch.utils.tensorboard import SummaryWriter 
 
-class InfoNCELoss(nn.Module):
-    def __init__(self, temp=0.5, contra_denominator=True):
-        super().__init__()
-        self.temp = temp
-        self.contra_denominator = contra_denominator
-    
-    def forward(self, pos_rep, neg_rep, mask):
-        """
-            pos: (B, N, D)
-            neg: (B, N, M, D)
-            mask: (B, N, M), where 0 means positive indices, 1 means negative indices
-            return: InfoNCE loss, i.e., unsupervised contrastive loss
-        """
-        sim_score = torch.exp(F.cosine_similarity(pos_rep.unsqueeze(2), neg_rep, dim=-1) / self.temp)  # B, N, M
-        pos_score = torch.sum(~mask * sim_score, dim=-1)  # B, N
-        neg_score = torch.sum(mask * sim_score, dim=-1)  # B, N
-        if self.contra_denominator:
-            ratio = pos_score / (pos_score + neg_score)  # B, N
-        else:
-            ratio = pos_score / neg_score 
-        return torch.mean(-torch.log(ratio))
-        
-    
 def print_model(model):
     param_count = 0
     logger.info('Trainable parameter list:')
@@ -48,11 +26,12 @@ def print_model(model):
     return
 
 def get_model():  
-    model = MemGCRN(num_nodes=args.num_nodes, input_dim=args.input_dim, output_dim=args.output_dim, horizon=args.horizon, 
-                 rnn_units=args.rnn_units, rnn_layers=args.rnn_layers, embed_dim=args.embed_dim, cheb_k=args.max_diffusion_step, 
-                 mem_num=args.mem_num, mem_dim=args.mem_dim, cl_decay_steps=args.cl_decay_steps, use_curriculum_learning=args.use_curriculum_learning,
-                 delta=args.delta, method=args.method, contra_denominator=args.contra_denominator, scaler=None).to(device)
-    return model
+    model = GCRN(num_nodes=args.num_nodes, input_dim=args.input_dim, output_dim=args.output_dim, horizon=args.horizon, 
+                 rnn_units=args.rnn_units, num_layers=args.num_rnn_layers, embed_dim=args.embed_dim, cheb_k = args.max_diffusion_step, 
+                 cl_decay_steps=args.cl_decay_steps, use_curriculum_learning=args.use_curriculum_learning, delta=args.delta, fn_t=args.fn_t, 
+                 temp=args.temp, top_k=args.top_k, input_masking_ratio=args.im_t, fusion_num=args.fusion_num, 
+                 schema=args.schema, contra_denominator=args.contra_denominator, device=device).to(device)  # TODo: add new parameters here
+    return model 
 
 def prepare_x_y(x, y):
     """
@@ -63,48 +42,35 @@ def prepare_x_y(x, y):
     :return2: x: shape (seq_len, batch_size, num_sensor * input_dim)
               y: shape (horizon, batch_size, num_sensor * output_dim)
     """
-    x0 = x[..., 0:1]  # speed
-    x1 = x[..., 1:2]  # weekdaytime 
-    x2 = x[..., 2:3]  # history_speed
-    y0 = y[..., 0:1]
-    y1 = y[..., 1:2]
-    y2 = y[..., 2:3]
+    x0 = x[..., 0:1] # x
+    x1 = x[..., 1:2] # x_cov (time in week normalize 0,2016 to 0,1)
+    x2 = x[..., 2:3] # x_his (history average)
+    y0 = y[..., 0:1] # y
+    y1 = y[..., 1:2] # y_cov
+    y2 = y[..., 2:3] # y_his
     x0 = torch.from_numpy(x0).float()
     x1 = torch.from_numpy(x1).float()
     x2 = torch.from_numpy(x2).float()
     y0 = torch.from_numpy(y0).float()
     y1 = torch.from_numpy(y1).float()
     y2 = torch.from_numpy(y2).float()
-    return x0.to(device), x1.to(device), x2.to(device), y0.to(device), y1.to(device), y2.to(device) # x, x_cov, x_his, y, y_cov, y_his
-    
+    return x0.to(device), x1.to(device), x2.to(device), y0.to(device), y1.to(device), y2.to(device)  # x, x_cov, x_his, y, y_cov, y_his
+
 def evaluate(model, mode):
     with torch.no_grad():
         model = model.eval()
         data_iter =  data[f'{mode}_loader'].get_iterator()
-        losses, ys_true, ys_pred = [], [], []
+        ys_true, ys_pred = [], []
         for x, y in data_iter:
-            x, x_cov, x_his, y, y_cov, y_his = prepare_x_y(x, y)
-            output, h_att, query, pos, neg, mask = model(x, y_cov, x_cov=x_cov, x_his=x_his, y_his=y_his)
+            x, x_cov, x_his, y, y_cov, _ = prepare_x_y(x, y)
+            output, _ = model(x, x_cov, x_his, y_cov)
             y_pred = scaler.inverse_transform(output)
             y_true = scaler.inverse_transform(y)
-            loss1 = masked_mae_loss(y_pred, y_true)
-            if args.method == "baseline":
-                separate_loss = nn.TripletMarginLoss(margin=1.0)
-                loss2 = separate_loss(query, pos.detach(), neg.detach())
-            elif args.method == "SCL":
-                separate_loss = InfoNCELoss(temp=args.temp, contra_denominator=args.contra_denominator)
-                loss2 = separate_loss(pos, neg, mask)
-            else:
-                pass
-            compact_loss = nn.MSELoss()
-            loss3 = compact_loss(query, pos.detach())
-            loss = loss1 + args.lamb * loss2 + args.lamb1 * loss3
-            losses.append(loss.item())
             ys_true.append(y_true)
             ys_pred.append(y_pred)
-        mean_loss = np.mean(losses)
         y_size = data[f'y_{mode}'].shape[0]
         ys_true, ys_pred = torch.cat(ys_true, dim=0)[:y_size], torch.cat(ys_pred, dim=0)[:y_size]
+        loss = masked_mae_loss(ys_pred, ys_true)
 
         if mode == 'test':
             ys_true, ys_pred = ys_true.permute(1, 0, 2, 3), ys_pred.permute(1, 0, 2, 3)
@@ -120,14 +86,15 @@ def evaluate(model, mode):
             mae_12 = masked_mae_loss(ys_pred[11:12], ys_true[11:12]).item()
             mape_12 = masked_mape_loss(ys_pred[11:12], ys_true[11:12]).item()
             rmse_12 = masked_rmse_loss(ys_pred[11:12], ys_true[11:12]).item()
-            logger.info('Horizon overall: mae: {:.4f}, mape: {:.4f}, rmse: {:.4f}'.format(mae, mape, rmse))
-            logger.info('Horizon 15mins: mae: {:.4f}, mape: {:.4f}, rmse: {:.4f}'.format(mae_3, mape_3, rmse_3))
-            logger.info('Horizon 30mins: mae: {:.4f}, mape: {:.4f}, rmse: {:.4f}'.format(mae_6, mape_6, rmse_6))
-            logger.info('Horizon 60mins: mae: {:.4f}, mape: {:.4f}, rmse: {:.4f}'.format(mae_12, mape_12, rmse_12))
+            logger.info('Horizon overall: mae: {:.4f}, mape: {:.4f}, rmse: {:.4f}'.format(mae, mape * 100, rmse))
+            logger.info('Horizon 15mins: mae: {:.4f}, mape: {:.4f}, rmse: {:.4f}'.format(mae_3, mape_3 * 100, rmse_3))
+            logger.info('Horizon 30mins: mae: {:.4f}, mape: {:.4f}, rmse: {:.4f}'.format(mae_6, mape_6 * 100, rmse_6))
+            logger.info('Horizon 60mins: mae: {:.4f}, mape: {:.4f}, rmse: {:.4f}'.format(mae_12, mape_12 * 100, rmse_12))
             ys_true, ys_pred = ys_true.permute(1, 0, 2, 3), ys_pred.permute(1, 0, 2, 3)
-            
-        return mean_loss, ys_true, ys_pred
         
+        return loss, ys_true, ys_pred
+
+    
 def traintest_model():  
     model = get_model()
     print_model(model)
@@ -140,49 +107,46 @@ def traintest_model():
         start_time = time.time()
         model = model.train()
         data_iter = data['train_loader'].get_iterator()
-        losses, mae_losses, contra_losses, compact_losses = [], [], [], []
+        losses, mae_losses, contra_losses = [], [], []  # TODO: record new losses here
         for x, y in data_iter:
             optimizer.zero_grad()
-            x, x_cov, x_his, y, y_cov, y_his = prepare_x_y(x, y)
-            output, h_att, query, pos, neg, mask = model(x, y_cov, y, x_cov=x_cov, x_his=x_his, y_his=y_his, batches_seen=batches_seen)
+            x, x_cov, x_his, y, y_cov, _ = prepare_x_y(x, y)
+            output, u_loss = model(x, x_cov, x_his, y_cov, y, batches_seen) # TODO: add new parameters <xcov> here
             y_pred = scaler.inverse_transform(output)
             y_true = scaler.inverse_transform(y)
-            loss1 = masked_mae_loss(y_pred, y_true)
-            if args.method == "baseline":
-                separate_loss = nn.TripletMarginLoss(margin=1.0)
-                loss2 = separate_loss(query, pos.detach(), neg.detach())
-            elif args.method == "SCL":
-                separate_loss = InfoNCELoss(temp=args.temp, contra_denominator=args.contra_denominator)
-                loss2 = separate_loss(pos, neg, mask)
-            else:
-                pass
-            compact_loss = nn.MSELoss()
-            loss3 = compact_loss(query, pos.detach())
-            loss = loss1 + args.lamb * loss2 + args.lamb1 * loss3
+            mae_loss = masked_mae_loss(y_pred, y_true) # masked_mae_loss(y_pred, y_true)
+            # TODO: add self-supervised contra loss
+            if u_loss is None:
+                u_loss = torch.zeros_like(mae_loss)
+            loss = mae_loss + args.lam * u_loss 
             losses.append(loss.item())
-            mae_losses.append(loss1.item())
-            contra_losses.append(loss2.item())
-            compact_losses.append(loss3.item())
+            mae_losses.append(mae_loss.item())
+            contra_losses.append(u_loss.item())
             batches_seen += 1
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm) # gradient clipping - this does it in place
             optimizer.step()
         train_loss = np.mean(losses)
-        train_mae_loss = np.mean(mae_losses)
+        train_mae_loss = np.mean(mae_losses)  # TODO: record new loss
         train_contra_loss = np.mean(contra_losses)
-        train_compact_loss = np.mean(compact_losses)
         lr_scheduler.step()
         val_loss, _, _ = evaluate(model, 'val')
         end_time2 = time.time()
-        message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, train_mae_loss: {:.4f}, train_contra_loss: {:.4f}, train_compact_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.1f}s'.format(epoch_num + 1, 
-                   args.epochs, batches_seen, train_loss, train_mae_loss, train_contra_loss, train_compact_loss, val_loss, optimizer.param_groups[0]['lr'], (end_time2 - start_time))
+        message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, train_mae_loss: {:.4f}, train_contra_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.1f}s'.format(epoch_num + 1, args.epochs, batches_seen, train_loss, train_mae_loss, train_contra_loss, val_loss, optimizer.param_groups[0]['lr'], (end_time2 - start_time))
         logger.info(message)
+        # TODO: record loss curve
+        writer.add_scalar('train loss', train_loss, epoch_num + 1)
+        writer.add_scalar('mae loss', train_mae_loss, epoch_num + 1)
+        writer.add_scalar('contra loss', train_contra_loss, epoch_num + 1)
+        writer.add_scalar('validation loss', val_loss, epoch_num + 1)
         test_loss, _, _ = evaluate(model, 'test')
-        
+        writer.add_scalar('test loss', test_loss, epoch_num + 1)
+
         if val_loss < min_val_loss:
             wait = 0
             min_val_loss = val_loss
             torch.save(model.state_dict(), modelpt_path)
+            # logger.info('Val loss decrease from {:.4f} to {:.4f}, saving model to pt'.format(min_val_loss, val_loss))
         elif val_loss >= min_val_loss:
             wait += 1
             if wait == args.patience:
@@ -206,13 +170,9 @@ parser.add_argument('--input_dim', type=int, default=1, help='number of input ch
 parser.add_argument('--output_dim', type=int, default=1, help='number of output channel')
 parser.add_argument('--embed_dim', type=int, default=8, help='embedding dimension for adaptive graph')
 parser.add_argument('--max_diffusion_step', type=int, default=3, help='max diffusion step or Cheb K')
-parser.add_argument('--rnn_layers', type=int, default=1, help='number of rnn layers')
+parser.add_argument('--num_rnn_layers', type=int, default=1, help='number of rnn layers')
 parser.add_argument('--rnn_units', type=int, default=64, help='number of rnn units')
-parser.add_argument('--mem_num', type=int, default=20, help='number of meta-nodes/prototypes')
-parser.add_argument('--mem_dim', type=int, default=64, help='dimension of meta-nodes/prototypes')
 parser.add_argument("--loss", type=str, default='mask_mae_loss', help="mask_mae_loss")
-parser.add_argument('--lamb', type=float, default=0.01, help='lamb value for separate loss')
-parser.add_argument('--lamb1', type=float, default=0.0, help='lamb1 value for compact loss')
 parser.add_argument("--epochs", type=int, default=200, help="number of epochs of training")
 parser.add_argument("--patience", type=int, default=20, help="patience used for early stop")
 parser.add_argument("--batch_size", type=int, default=64, help="size of the batches")
@@ -223,14 +183,19 @@ parser.add_argument("--epsilon", type=float, default=1e-3, help="optimizer epsil
 parser.add_argument("--max_grad_norm", type=int, default=5, help="max_grad_norm")
 parser.add_argument("--use_curriculum_learning", type=eval, choices=[True, False], default='True', help="use_curriculum_learning")
 parser.add_argument("--cl_decay_steps", type=int, default=2000, help="cl_decay_steps")
-parser.add_argument('--test_every_n_epochs', type=int, default=5, help='test_every_n_epochs')
 parser.add_argument('--gpu', type=int, default=0, help='which gpu to use')
-parser.add_argument('--seed', type=int, default=100, help='random seed')
-# TODO: add more arguments for supervised contrastive learning
-parser.add_argument('--delta', type=float, default=10.0, help='abnormal threshold')
-parser.add_argument('--method', type=str, choices=["baseline", "SCL"], default="SCL", help='whether to use baseline or supervised contrastive learning')
-parser.add_argument('--contra_denominator', type=eval, choices=[True, False], default='True', help='true is for pos/pos+neg, false is for pos/neg.')
-parser.add_argument('--temp', type=float, default=1.0, help='temperature')
+# parser.add_argument('--seed', type=int, default=100, help='random seed.')
+# TODO: support contra learning
+parser.add_argument('--delta', type=float, default=0.1, help='threshold to discriminate normal and abnormal')
+parser.add_argument('--temp', type=float, default=0.1, help='temperature parameter')
+parser.add_argument('--lam', type=float, default=0.05, help='loss lambda') 
+parser.add_argument('--fn_t', type=int, default=12, help='filter negatives threshold, 12 means 1 hour')
+parser.add_argument('--top_k', type=int, default=10, help='graph neighbors threshold, 10 means top 10 nodes')
+parser.add_argument('--fusion_num', type=int, default=2, help='layer num of fusion layer')
+parser.add_argument('--im_t', type=int, default=0.01, help='input masking ratio')
+parser.add_argument('--schema', type=int, default=1, choices=[0, 1, 2, 3, 4, 5], help='which contra backbone schema to use (0 is no contrast, i.e., baseline)')
+parser.add_argument('--contra_denominator', type=eval, choices=[True, False], default='True', help='whether to contain pos_score in the denominator of contra loss')
+
 args = parser.parse_args()
         
 if args.dataset == 'METRLA':
@@ -242,7 +207,7 @@ elif args.dataset == 'PEMSBAY':
 else:
     pass # including more datasets in the future    
 
-model_name = 'MemGCRN'
+model_name = 'GCRN'
 timestring = time.strftime('%Y%m%d%H%M%S', time.localtime())
 path = f'../save/{args.dataset}_{model_name}_{timestring}'
 logging_path = f'{path}/{model_name}_{timestring}_logging.txt'
@@ -254,6 +219,7 @@ shutil.copy2(sys.argv[0], path)
 shutil.copy2(f'{model_name}.py', path)
 shutil.copy2('utils.py', path)
     
+writer = SummaryWriter(path)  # TODO: use tensorboard to record summary
 logger = logging.getLogger(__name__)
 logger.setLevel(level = logging.INFO)
 class MyFormatter(logging.Formatter):
@@ -281,15 +247,11 @@ logger.info('seq_len', args.seq_len)
 logger.info('horizon', args.horizon)
 logger.info('input_dim', args.input_dim)
 logger.info('output_dim', args.output_dim)
-logger.info('rnn_layers', args.rnn_layers)
-logger.info('rnn_units', args.rnn_units)
 logger.info('embed_dim', args.embed_dim)
+logger.info('num_rnn_layers', args.num_rnn_layers)
+logger.info('rnn_units', args.rnn_units)
 logger.info('max_diffusion_step', args.max_diffusion_step)
-logger.info('mem_num', args.mem_num)
-logger.info('mem_dim', args.mem_dim)
 logger.info('loss', args.loss)
-logger.info('separate loss lamb', args.lamb)
-logger.info('compact loss lamb1', args.lamb1)
 logger.info('batch_size', args.batch_size)
 logger.info('epochs', args.epochs)
 logger.info('patience', args.patience)
@@ -298,11 +260,17 @@ logger.info('epsilon', args.epsilon)
 logger.info('steps', args.steps)
 logger.info('lr_decay_ratio', args.lr_decay_ratio)
 logger.info('use_curriculum_learning', args.use_curriculum_learning)
-# TODO: add more arguments for supervised contrastive learning
+logger.info('cl_decay_steps', args.cl_decay_steps)
+# TODO: print new hyper-parameters
 logger.info('delta', args.delta)
-logger.info('method', args.method)
-logger.info('contra_denominator', args.contra_denominator)
 logger.info('temp', args.temp)
+logger.info('lam', args.lam)
+logger.info('fn_t', args.fn_t)
+logger.info('top_k', args.top_k)
+logger.info('fusion_num', args.fusion_num)
+logger.info('input_masking_ratio', args.im_t)
+logger.info('backbone_schema', args.schema)
+logger.info('contra_denominator', args.contra_denominator)
 
 cpu_num = 1
 os.environ ['OMP_NUM_THREADS'] = str(cpu_num)
@@ -313,9 +281,9 @@ os.environ ['NUMEXPR_NUM_THREADS'] = str(cpu_num)
 torch.set_num_threads(cpu_num)
 device = torch.device("cuda:{}".format(args.gpu)) if torch.cuda.is_available() else torch.device("cpu")
 # Please comment the following three lines for running experiments multiple times.
-np.random.seed(args.seed)
-torch.manual_seed(args.seed)
-if torch.cuda.is_available(): torch.cuda.manual_seed(args.seed)
+# np.random.seed(args.seed)
+# torch.manual_seed(args.seed)
+# if torch.cuda.is_available(): torch.cuda.manual_seed(args.seed)
 #####################################################################################################
 
 data = {}
