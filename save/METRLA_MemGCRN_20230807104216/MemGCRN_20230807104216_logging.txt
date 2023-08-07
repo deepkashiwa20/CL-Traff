@@ -1,0 +1,41 @@
+model MemGCRN
+dataset METRLA
+trainval_ratio 0.8
+val_ratio 0.125
+num_nodes 207
+seq_len 12
+horizon 12
+input_dim 1
+output_dim 1
+rnn_layers 1
+rnn_units 64
+embed_dim 8
+max_diffusion_step 3
+mem_num 20
+mem_dim 64
+loss mask_mae_loss
+separate loss lamb 0.01
+compact loss lamb1 0.0
+batch_size 64
+epochs 200
+patience 20
+lr 0.01
+epsilon 0.001
+steps [50, 100]
+lr_decay_ratio 0.1
+use_curriculum_learning True
+delta 10.0
+method SCL
+contra_denominator True
+temp 1.0
+METRLA training and testing started Mon Aug  7 10:42:39 2023
+train xs.shape, ys.shape (23974, 12, 207, 3) (23974, 12, 207, 3)
+val xs.shape, ys.shape (3425, 12, 207, 3) (3425, 12, 207, 3)
+test xs.shape, ys.shape (6850, 12, 207, 3) (6850, 12, 207, 3)
+Trainable parameter list: 
+In total: 381945 trainable parameters. 
+Epoch [1/200] (375) train_loss: 2.6460, train_mae_loss: 2.6264, train_contra_loss: 1.9584, train_compact_loss: 0.0464, val_loss: 3.7436, lr: 0.010000, 53.7s 
+Horizon overall: mae: 4.1730, mape: 0.1097, rmse: 8.4323 
+Horizon 15mins: mae: 3.2564, mape: 0.0834, rmse: 6.4719 
+Horizon 30mins: mae: 4.0899, mape: 0.1078, rmse: 8.2307 
+Horizon 60mins: mae: 5.5981, mape: 0.1500, rmse: 10.8442 
