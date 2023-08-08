@@ -276,7 +276,7 @@ class GCRN(nn.Module):
         
         # TODO: support different augmentation schemas
         #* two encoders
-        if labels is not None and self.schema in [1, 3]:
+        if self.schema in [1, 3]:
             init_state_aug = self.encoder_aug.init_hidden(x.shape[0])
             h_en_aug, state_en_aug = self.encoder_aug(x, init_state_aug, support) # B, T, N, hidden      
             h_t_aug = h_en_aug[:, -1, :, :]   # B, N, hidden (last state)
@@ -287,7 +287,7 @@ class GCRN(nn.Module):
             h_t = self.sampling(self.fc_aug2_mean(h_t), self.fc_aug2_var(h_t))
         
         #* fusion for decoder
-        if labels is not None and self.schema == 3:  
+        if self.schema == 3:  
             ht_list_aug = [h_t_aug]*self.num_layers
             ht_list = [self.fusion_layer(torch.cat(ht_list + ht_list_aug, dim=-1))]*self.num_layers
         

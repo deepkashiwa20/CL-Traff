@@ -12,8 +12,8 @@ from torchsummary import summary
 import argparse
 import logging
 from utils import StandardScaler, DataLoader, masked_mae_loss, masked_mape_loss, masked_mse_loss, masked_rmse_loss
-from GCRN import GCRN
-from torch.utils.tensorboard import SummaryWriter 
+from GCRNstgcl import GCRN
+# from torch.utils.tensorboard import SummaryWriter 
 
 def print_model(model):
     param_count = 0
@@ -135,12 +135,12 @@ def traintest_model():
         message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, train_mae_loss: {:.4f}, train_contra_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.1f}s'.format(epoch_num + 1, args.epochs, batches_seen, train_loss, train_mae_loss, train_contra_loss, val_loss, optimizer.param_groups[0]['lr'], (end_time2 - start_time))
         logger.info(message)
         # TODO: record loss curve
-        writer.add_scalar('train loss', train_loss, epoch_num + 1)
-        writer.add_scalar('mae loss', train_mae_loss, epoch_num + 1)
-        writer.add_scalar('contra loss', train_contra_loss, epoch_num + 1)
-        writer.add_scalar('validation loss', val_loss, epoch_num + 1)
+        # writer.add_scalar('train loss', train_loss, epoch_num + 1)
+        # writer.add_scalar('mae loss', train_mae_loss, epoch_num + 1)
+        # writer.add_scalar('contra loss', train_contra_loss, epoch_num + 1)
+        # writer.add_scalar('validation loss', val_loss, epoch_num + 1)
         test_loss, _, _ = evaluate(model, 'test')
-        writer.add_scalar('test loss', test_loss, epoch_num + 1)
+        # writer.add_scalar('test loss', test_loss, epoch_num + 1)
 
         if val_loss < min_val_loss:
             wait = 0
@@ -184,16 +184,16 @@ parser.add_argument("--max_grad_norm", type=int, default=5, help="max_grad_norm"
 parser.add_argument("--use_curriculum_learning", type=eval, choices=[True, False], default='True', help="use_curriculum_learning")
 parser.add_argument("--cl_decay_steps", type=int, default=2000, help="cl_decay_steps")
 parser.add_argument('--gpu', type=int, default=0, help='which gpu to use')
-# parser.add_argument('--seed', type=int, default=100, help='random seed.')
+parser.add_argument('--seed', type=int, default=100, help='random seed.')
 # TODO: support contra learning
-parser.add_argument('--delta', type=float, default=0.1, help='threshold to discriminate normal and abnormal')
+parser.add_argument('--delta', type=float, default=10, help='threshold to discriminate normal and abnormal')
 parser.add_argument('--temp', type=float, default=0.1, help='temperature parameter')
 parser.add_argument('--lam', type=float, default=0.05, help='loss lambda') 
 parser.add_argument('--fn_t', type=int, default=12, help='filter negatives threshold, 12 means 1 hour')
 parser.add_argument('--top_k', type=int, default=10, help='graph neighbors threshold, 10 means top 10 nodes')
 parser.add_argument('--fusion_num', type=int, default=2, help='layer num of fusion layer')
 parser.add_argument('--im_t', type=int, default=0.01, help='input masking ratio')
-parser.add_argument('--schema', type=int, default=1, choices=[0, 1, 2, 3, 4, 5], help='which contra backbone schema to use (0 is no contrast, i.e., baseline)')
+parser.add_argument('--schema', type=int, default=3, choices=[0, 1, 2, 3, 4, 5], help='which contra backbone schema to use (0 is no contrast, i.e., baseline)')
 parser.add_argument('--contra_denominator', type=eval, choices=[True, False], default='True', help='whether to contain pos_score in the denominator of contra loss')
 
 args = parser.parse_args()
@@ -207,7 +207,7 @@ elif args.dataset == 'PEMSBAY':
 else:
     pass # including more datasets in the future    
 
-model_name = 'GCRN'
+model_name = 'GCRNstgcl'
 timestring = time.strftime('%Y%m%d%H%M%S', time.localtime())
 path = f'../save/{args.dataset}_{model_name}_{timestring}'
 logging_path = f'{path}/{model_name}_{timestring}_logging.txt'
@@ -219,7 +219,7 @@ shutil.copy2(sys.argv[0], path)
 shutil.copy2(f'{model_name}.py', path)
 shutil.copy2('utils.py', path)
     
-writer = SummaryWriter(path)  # TODO: use tensorboard to record summary
+# writer = SummaryWriter(path)  # TODO: use tensorboard to record summary
 logger = logging.getLogger(__name__)
 logger.setLevel(level = logging.INFO)
 class MyFormatter(logging.Formatter):
@@ -281,9 +281,9 @@ os.environ ['NUMEXPR_NUM_THREADS'] = str(cpu_num)
 torch.set_num_threads(cpu_num)
 device = torch.device("cuda:{}".format(args.gpu)) if torch.cuda.is_available() else torch.device("cpu")
 # Please comment the following three lines for running experiments multiple times.
-# np.random.seed(args.seed)
-# torch.manual_seed(args.seed)
-# if torch.cuda.is_available(): torch.cuda.manual_seed(args.seed)
+np.random.seed(args.seed)
+torch.manual_seed(args.seed)
+if torch.cuda.is_available(): torch.cuda.manual_seed(args.seed)
 #####################################################################################################
 
 data = {}

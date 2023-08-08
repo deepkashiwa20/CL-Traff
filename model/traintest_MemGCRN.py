@@ -51,7 +51,7 @@ def get_model():
     model = MemGCRN(num_nodes=args.num_nodes, input_dim=args.input_dim, output_dim=args.output_dim, horizon=args.horizon, 
                  rnn_units=args.rnn_units, rnn_layers=args.rnn_layers, embed_dim=args.embed_dim, cheb_k=args.max_diffusion_step, 
                  mem_num=args.mem_num, mem_dim=args.mem_dim, cl_decay_steps=args.cl_decay_steps, use_curriculum_learning=args.use_curriculum_learning,
-                 delta=args.delta, method=args.method, contra_denominator=args.contra_denominator, scaler=scaler).to(device)
+                 delta=args.delta, method=args.method, scaler=scaler, two_memories=args.two_memories).to(device)
     return model
 
 def prepare_x_y(x, y):
@@ -120,10 +120,10 @@ def evaluate(model, mode):
             mae_12 = masked_mae_loss(ys_pred[11:12], ys_true[11:12]).item()
             mape_12 = masked_mape_loss(ys_pred[11:12], ys_true[11:12]).item()
             rmse_12 = masked_rmse_loss(ys_pred[11:12], ys_true[11:12]).item()
-            logger.info('Horizon overall: mae: {:.4f}, mape: {:.4f}, rmse: {:.4f}'.format(mae, mape, rmse))
-            logger.info('Horizon 15mins: mae: {:.4f}, mape: {:.4f}, rmse: {:.4f}'.format(mae_3, mape_3, rmse_3))
-            logger.info('Horizon 30mins: mae: {:.4f}, mape: {:.4f}, rmse: {:.4f}'.format(mae_6, mape_6, rmse_6))
-            logger.info('Horizon 60mins: mae: {:.4f}, mape: {:.4f}, rmse: {:.4f}'.format(mae_12, mape_12, rmse_12))
+            logger.info('Horizon overall: mae: {:.4f}, mape: {:.4f}, rmse: {:.4f}'.format(mae, mape * 100, rmse))
+            logger.info('Horizon 15mins: mae: {:.4f}, mape: {:.4f}, rmse: {:.4f}'.format(mae_3, mape_3 * 100, rmse_3))
+            logger.info('Horizon 30mins: mae: {:.4f}, mape: {:.4f}, rmse: {:.4f}'.format(mae_6, mape_6 * 100, rmse_6))
+            logger.info('Horizon 60mins: mae: {:.4f}, mape: {:.4f}, rmse: {:.4f}'.format(mae_12, mape_12 * 100, rmse_12))
             ys_true, ys_pred = ys_true.permute(1, 0, 2, 3), ys_pred.permute(1, 0, 2, 3)
             
         return mean_loss, ys_true, ys_pred
@@ -231,6 +231,7 @@ parser.add_argument('--delta', type=float, default=10.0, help='abnormal threshol
 parser.add_argument('--method', type=str, choices=["baseline", "SCL"], default="SCL", help='whether to use baseline or supervised contrastive learning')
 parser.add_argument('--contra_denominator', type=eval, choices=[True, False], default='True', help='true is for pos/pos+neg, false is for pos/neg.')
 parser.add_argument('--temp', type=float, default=1.0, help='temperature')
+parser.add_argument('--two_memories', type=eval, choices=[True, False], default='False', help='true is to use normal and abnormal memories.')
 args = parser.parse_args()
         
 if args.dataset == 'METRLA':
@@ -303,6 +304,7 @@ logger.info('delta', args.delta)
 logger.info('method', args.method)
 logger.info('contra_denominator', args.contra_denominator)
 logger.info('temp', args.temp)
+logger.info('two_memories', args.two_memories)
 
 cpu_num = 1
 os.environ ['OMP_NUM_THREADS'] = str(cpu_num)

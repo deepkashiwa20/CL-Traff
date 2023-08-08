@@ -116,7 +116,7 @@ class GCRNN_Decoder(nn.Module):
 class MemGCRN(nn.Module):
     def __init__(self, num_nodes, input_dim, output_dim, horizon, rnn_units, rnn_layers=1, embed_dim=8, cheb_k=3,
                  ycov_dim=1, mem_num=20, mem_dim=64, cl_decay_steps=2000, use_curriculum_learning=True,
-                 delta=10., contra_denominator=True, method="SCL", scaler=None):
+                 delta=10., method="SCL", scaler=None, two_memories=False):
         super(MemGCRN, self).__init__()
         self.num_nodes = num_nodes
         self.input_dim = input_dim
@@ -133,6 +133,7 @@ class MemGCRN(nn.Module):
         self.delta = delta
         self.method = method
         self.scaler = scaler
+        self.two_memories = two_memories
         
         # memory
         self.mem_num = mem_num
@@ -146,7 +147,10 @@ class MemGCRN(nn.Module):
         self.encoder = GCRNN_Encoder(self.num_nodes, self.input_dim, self.rnn_units, self.cheb_k, self.rnn_layers)
         
         # deocoder
-        self.decoder_dim = self.rnn_units + self.mem_dim * 2
+        if self.two_memories:
+            self.decoder_dim = self.rnn_units + self.mem_dim * 2
+        else:
+            self.decoder_dim = self.rnn_units + self.mem_dim
         self.decoder = GCRNN_Decoder(self.num_nodes, self.output_dim + self.ycov_dim, self.decoder_dim, self.cheb_k, self.rnn_layers)
 
         # output
@@ -163,7 +167,8 @@ class MemGCRN(nn.Module):
     def construct_memory(self):
         memory_dict = nn.ParameterDict()
         memory_dict['Memory'] = nn.Parameter(torch.randn(self.mem_num, self.mem_dim), requires_grad=True)     # (M, d)
-        memory_dict['Memory_abnormal'] = nn.Parameter(torch.randn(self.mem_num, self.mem_dim), requires_grad=True)
+        if self.two_memories:
+            memory_dict['Memory_abnormal'] = nn.Parameter(torch.randn(self.mem_num, self.mem_dim), requires_grad=True)
         memory_dict['Wq'] = nn.Parameter(torch.randn(self.rnn_units, self.mem_dim), requires_grad=True)    # project to query
         for param in memory_dict.values():
             nn.init.xavier_normal_(param)
@@ -172,43 +177,60 @@ class MemGCRN(nn.Module):
     def query_memory(self, h_t:torch.Tensor, labels=None):
         query = torch.matmul(h_t, self.memory['Wq'])     # (B, N, d)
         
-        normal_query = labels * query
-        normal_att_score = torch.softmax(torch.matmul(normal_query, self.memory['Memory'].t()), dim=-1) 
-        normal_value = torch.matmul(normal_att_score, self.memory['Memory'])     # (B, N, d)# alpha: (B, N, M)
-        _, normal_ind = torch.topk(normal_att_score, k=2, dim=-1)
-        
-        abnormal_query = ~labels * query
-        abnormal_att_score = torch.softmax(torch.matmul(abnormal_query, self.memory['Memory_abnormal'].t()), dim=-1)
-        abnormal_value = torch.matmul(abnormal_att_score, self.memory['Memory_abnormal'])     # (B, N, d)
-        _, abnormal_ind = torch.topk(abnormal_att_score, k=2, dim=-1)
+        if self.two_memories:
+            normal_query = labels * query
+            normal_att_score = torch.softmax(torch.matmul(normal_query, self.memory['Memory'].t()), dim=-1) 
+            normal_value = torch.matmul(normal_att_score, self.memory['Memory'])     # (B, N, d)# alpha: (B, N, M)
+            _, normal_ind = torch.topk(normal_att_score, k=2, dim=-1)
+            
+            abnormal_query = ~labels * query
+            abnormal_att_score = torch.softmax(torch.matmul(abnormal_query, self.memory['Memory_abnormal'].t()), dim=-1)
+            abnormal_value = torch.matmul(abnormal_att_score, self.memory['Memory_abnormal'])     # (B, N, d)
+            _, abnormal_ind = torch.topk(abnormal_att_score, k=2, dim=-1)
+        else:
+            att_score = torch.softmax(torch.matmul(query, self.memory['Memory'].t()), dim=-1)
+            value = torch.matmul(att_score, self.memory['Memory']) 
+            _, ind = torch.topk(att_score, k=2, dim=-1)
         
         if self.method == "baseline":
-            normal_pos = self.memory['Memory'][normal_ind[:, :, 0]] # B, N, d
-            normal_neg = self.memory['Memory'][normal_ind[:, :, 1]] # B, N, d
-            
-            abnormal_pos = self.memory['Memory_abnormal'][abnormal_ind[:, :, 0]] # B, N, d
-            abnormal_neg = self.memory['Memory_abnormal'][abnormal_ind[:, :, 1]] # B, N, d
+            if self.two_memories:
+                normal_pos = self.memory['Memory'][normal_ind[:, :, 0]] # B, N, d
+                normal_neg = self.memory['Memory'][normal_ind[:, :, 1]] # B, N, d
+                
+                abnormal_pos = self.memory['Memory_abnormal'][abnormal_ind[:, :, 0]] # B, N, d
+                abnormal_neg = self.memory['Memory_abnormal'][abnormal_ind[:, :, 1]] # B, N, d
+            else:
+                pos = self.memory['Memory'][ind[:, :, 0]] # B, N, d
+                neg = self.memory['Memory'][ind[:, :, 1]] # B, N, d
         elif self.method == "SCL":
-            normal_pos = self.memory['Memory'][normal_ind[:, :, 0]] # B, N, d
-            normal_neg = self.memory['Memory'].repeat(query.shape[0], self.num_nodes, 1, 1)  # (B, N, M, d)
-            normal_mask_index = normal_ind[:, :, [0]]  # B, N, 1
-            normal_mask = torch.ones_like(normal_att_score, dtype=torch.bool).to(normal_att_score.device)  # B, N, M
-            normal_mask = normal_mask.scatter(-1, normal_mask_index, False)
-            
-            abnormal_pos = self.memory['Memory_abnormal'][abnormal_ind[:, :, 0]] # B, N, d
-            abnormal_neg = self.memory['Memory_abnormal'].repeat(query.shape[0], self.num_nodes, 1, 1)  # (B, N, M, d)
-            abnormal_mask_index = abnormal_ind[:, :, [0]]  # B, N, 1
-            abnormal_mask = torch.ones_like(abnormal_att_score, dtype=torch.bool).to(abnormal_att_score.device)  # B, N, M
-            abnormal_mask = abnormal_mask.scatter(-1, abnormal_mask_index, False)
+            if self.two_memories:
+                normal_pos = self.memory['Memory'][normal_ind[:, :, 0]] # B, N, d
+                normal_neg = self.memory['Memory'].repeat(query.shape[0], self.num_nodes, 1, 1)  # (B, N, M, d)
+                normal_mask_index = normal_ind[:, :, [0]]  # B, N, 1
+                normal_mask = torch.ones_like(normal_att_score, dtype=torch.bool).to(normal_att_score.device)  # B, N, M
+                normal_mask = normal_mask.scatter(-1, normal_mask_index, False)
+                
+                abnormal_pos = self.memory['Memory_abnormal'][abnormal_ind[:, :, 0]] # B, N, d
+                abnormal_neg = self.memory['Memory_abnormal'].repeat(query.shape[0], self.num_nodes, 1, 1)  # (B, N, M, d)
+                abnormal_mask_index = abnormal_ind[:, :, [0]]  # B, N, 1
+                abnormal_mask = torch.ones_like(abnormal_att_score, dtype=torch.bool).to(abnormal_att_score.device)  # B, N, M
+                abnormal_mask = abnormal_mask.scatter(-1, abnormal_mask_index, False)
+            else:
+                pos = self.memory['Memory'][ind[:, :, 0]] # B, N, d
+                neg = self.memory['Memory'].repeat(query.shape[0], self.num_nodes, 1, 1)  # (B, N, M, d)
+                mask_index = ind[:, :, [0]]  # B, N, 1
+                mask = torch.ones_like(att_score, dtype=torch.bool).to(att_score.device)  # B, N, M
+                mask = mask.scatter(-1, mask_index, False)
         else:
             raise NotImplementedError
-        value = torch.cat([normal_value, abnormal_value], dim=-1)  # B, N, 2*d
-        query = torch.cat([normal_query, abnormal_query], dim=0)  # 2*B, N, d
-        pos = torch.cat([normal_pos, abnormal_pos], dim=0) # 2*B, N, d
-        neg = torch.cat([normal_neg, abnormal_neg], dim=0)
+        if self.two_memories:
+            value = torch.cat([normal_value, abnormal_value], dim=-1)  # B, N, 2*d
+            query = torch.cat([normal_query, abnormal_query], dim=0)  # 2*B, N, d
+            pos = torch.cat([normal_pos, abnormal_pos], dim=0) # 2*B, N, d
+            neg = torch.cat([normal_neg, abnormal_neg], dim=0)
         if self.method == "baseline":
             mask = None
-        elif self.method == "SCL":
+        elif self.method == "SCL" and self.two_memories:
             mask = torch.cat([normal_mask, abnormal_mask], dim=0) # 2*B, N, M
         else:
             pass
