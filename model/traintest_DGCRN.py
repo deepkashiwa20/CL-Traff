@@ -198,12 +198,12 @@ parser.add_argument("--use_curriculum_learning", type=eval, choices=[True, False
 parser.add_argument("--cl_decay_steps", type=int, default=2000, help="cl_decay_steps")
 parser.add_argument('--gpu', type=int, default=0, help='which gpu to use')
 parser.add_argument('--seed', type=int, default=100, help='random seed.')
-parser.add_argument("--sup_contra", type=eval, choices=[True, False], default='False', help="whether to use supervised contrastive learning or baseline")
+parser.add_argument("--sup_contra", type=eval, choices=[True, False], default='True', help="whether to use supervised contrastive learning or baseline")
 parser.add_argument('--lamb', type=float, default=1., help='lamb value for supervised contrastive loss')  # 0.01
 parser.add_argument('--delta', type=float, default=10.0, help='abnormal threshold')
 parser.add_argument('--fn_t', type=int, default=12, help='filter negatives threshold, 12 means 1 hour')
 parser.add_argument('--top_k', type=int, default=10, help='graph neighbors threshold, 10 means top 10 nodes')
-parser.add_argument('--temp', type=float, default=0.1, help='temperature parameter')
+parser.add_argument('--temp', type=float, default=1., help='temperature parameter')
 args = parser.parse_args()
         
 if args.dataset == 'METRLA':
