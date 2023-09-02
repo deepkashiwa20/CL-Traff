@@ -120,7 +120,8 @@ class ADCRNN_Decoder(nn.Module):
 
 class DGCRN(nn.Module):
     def __init__(self, num_nodes, input_dim, output_dim, horizon, rnn_units, rnn_layers=1, cheb_k=3,
-                 ycov_dim=1, embed_dim=10, cl_decay_steps=2000, use_curriculum_learning=True):
+                 ycov_dim=1, embed_dim=10, cl_decay_steps=2000, use_curriculum_learning=True,
+                 delta=10., sup_contra=False, scaler=None):
         super(DGCRN, self).__init__()
         self.num_nodes = num_nodes
         self.input_dim = input_dim
@@ -133,6 +134,9 @@ class DGCRN(nn.Module):
         self.embed_dim = embed_dim
         self.cl_decay_steps = cl_decay_steps
         self.use_curriculum_learning = use_curriculum_learning
+        self.delta = delta
+        self.sup_contra = sup_contra
+        self.scaler = scaler
         
         # encoder
         self.encoder = ADCRNN_Encoder(self.num_nodes, self.input_dim, self.rnn_units, self.cheb_k, self.rnn_layers)
@@ -150,8 +154,14 @@ class DGCRN(nn.Module):
         
     def compute_sampling_threshold(self, batches_seen):
         return self.cl_decay_steps / (self.cl_decay_steps + np.exp(batches_seen / self.cl_decay_steps))
+    
+    def get_pseudo_labels(self, x, x_his):
+        x = self.scaler.inverse_transform(x)
+        diff = (x - x_his).abs()
+        pseudo_labels = (diff <= self.delta).squeeze(-1)  # (B, T, N)
+        return pseudo_labels.sum(1) 
             
-    def forward(self, x, y_cov, labels=None, batches_seen=None):
+    def forward(self, x, y_cov, labels=None, x_cov=None, x_his=None, y_his=None, batches_seen=None):
         support = F.softmax(F.relu(torch.mm(self.node_embeddings, self.node_embeddings.transpose(0, 1))), dim=1)
         supports_en = [support]
         init_state = self.encoder.init_hidden(x.shape[0])

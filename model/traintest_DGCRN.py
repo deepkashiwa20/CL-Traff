@@ -27,7 +27,8 @@ def print_model(model):
 def get_model():  
     model = DGCRN(num_nodes=args.num_nodes, input_dim=args.input_dim, output_dim=args.output_dim, horizon=args.horizon, 
                  rnn_units=args.rnn_units, rnn_layers=args.rnn_layers, embed_dim=args.embed_dim, cheb_k = args.max_diffusion_step, 
-                 cl_decay_steps=args.cl_decay_steps, use_curriculum_learning=args.use_curriculum_learning).to(device)
+                 cl_decay_steps=args.cl_decay_steps, use_curriculum_learning=args.use_curriculum_learning,
+                 delta=args.delta, sup_contra=args.sup_contra, scaler=scaler).to(device)
     return model
 
 def prepare_x_y(x, y):
@@ -47,14 +48,33 @@ def prepare_x_y(x, y):
     y1 = torch.from_numpy(y1).float()
     return x0.to(device), y0.to(device), y1.to(device) # x, y, y_cov
 
+def prepare_x_y_with_his(x, y):
+    x0 = x[..., 0:1] # x
+    x1 = x[..., 1:2] # x_cov (time in week normalize 0,2016 to 0,1)
+    x2 = x[..., 2:3] # x_his (history average)
+    y0 = y[..., 0:1] # y
+    y1 = y[..., 1:2] # y_cov
+    y2 = y[..., 2:3] # y_his
+    x0 = torch.from_numpy(x0).float()
+    x1 = torch.from_numpy(x1).float()
+    x2 = torch.from_numpy(x2).float()
+    y0 = torch.from_numpy(y0).float()
+    y1 = torch.from_numpy(y1).float()
+    y2 = torch.from_numpy(y2).float()
+    return x0.to(device), x1.to(device), x2.to(device), y0.to(device), y1.to(device), y2.to(device)  # x, x_cov, x_his, y, y_cov, y_his
+
 def evaluate(model, mode):
     with torch.no_grad():
         model = model.eval()
         data_iter =  data[f'{mode}_loader'].get_iterator()
         ys_true, ys_pred = [], []
         for x, y in data_iter:
-            x, y, ycov = prepare_x_y(x, y)
-            output = model(x, ycov)
+            if not args.sup_contra:
+                x, y, y_cov = prepare_x_y(x, y)
+                x_cov, x_his, y_his = None, None, None
+            else:
+                x, x_cov, x_his, y, y_cov, y_his = prepare_x_y_with_his(x, y)
+            output = model(x, y_cov, x_cov=x_cov, x_his=x_his, y_his=y_his)
             y_pred = scaler.inverse_transform(output)
             y_true = scaler.inverse_transform(y)
             ys_true.append(y_true)
@@ -98,25 +118,41 @@ def traintest_model():
         start_time = time.time()
         model = model.train()
         data_iter = data['train_loader'].get_iterator()
-        losses = []
+        losses, mae_losses, contra_losses  = [], [], []
         for x, y in data_iter:
             optimizer.zero_grad()
-            x, y, ycov = prepare_x_y(x, y)
-            output = model(x, ycov, y, batches_seen)
+            if not args.sup_contra:
+                x, y, y_cov = prepare_x_y(x, y)
+                x_cov, x_his, y_his = None, None, None
+            else:
+                x, x_cov, x_his, y, y_cov, y_his = prepare_x_y_with_his(x, y)
+            output = model(x, y_cov, y, x_cov=x_cov, x_his=x_his, y_his=y_his, batches_seen=batches_seen)
             y_pred = scaler.inverse_transform(output)
             y_true = scaler.inverse_transform(y)
             loss = masked_mae_loss(y_pred, y_true) # masked_mae_loss(y_pred, y_true)
+            if args.sup_contra:
+                contra_loss = 1
+                mae_losses.append(loss.item())
+                contra_losses.append(contra_loss.item())
+                loss = loss + args.lamb * contra_loss
             losses.append(loss.item())
             batches_seen += 1
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm) # gradient clipping - this does it in place
             optimizer.step()
         train_loss = np.mean(losses)
+        if args.sup_contra:
+            train_mae_loss = np.mean(mae_losses)
+            train_contra_loss = np.mean(contra_losses)
         lr_scheduler.step()
         val_loss, _, _ = evaluate(model, 'val')
         end_time2 = time.time()
-        message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.1f}s'.format(epoch_num + 1, 
+        if not args.sup_contra:
+            message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.1f}s'.format(epoch_num + 1, 
                    args.epochs, batches_seen, train_loss, val_loss, optimizer.param_groups[0]['lr'], (end_time2 - start_time))
+        else:
+            message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, train_mae_loss: {:.4f}, train_contra_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.1f}s'.format(epoch_num + 1, 
+                   args.epochs, batches_seen, train_loss, train_mae_loss, train_contra_loss, val_loss, optimizer.param_groups[0]['lr'], (end_time2 - start_time))
         logger.info(message)
         test_loss, _, _ = evaluate(model, 'test')
 
@@ -149,7 +185,7 @@ parser.add_argument('--output_dim', type=int, default=1, help='number of output 
 parser.add_argument('--embed_dim', type=int, default=10, help='embedding dimension for adaptive graph')
 parser.add_argument('--max_diffusion_step', type=int, default=3, help='max diffusion step or Cheb K')
 parser.add_argument('--rnn_layers', type=int, default=1, help='number of rnn layers')
-parser.add_argument('--rnn_units', type=int, default=64, help='number of rnn units')
+parser.add_argument('--rnn_units', type=int, default=128, help='number of rnn units')
 parser.add_argument("--loss", type=str, default='mask_mae_loss', help="mask_mae_loss")
 parser.add_argument("--epochs", type=int, default=200, help="number of epochs of training")
 parser.add_argument("--patience", type=int, default=20, help="patience used for early stop")
@@ -163,6 +199,9 @@ parser.add_argument("--use_curriculum_learning", type=eval, choices=[True, False
 parser.add_argument("--cl_decay_steps", type=int, default=2000, help="cl_decay_steps")
 parser.add_argument('--gpu', type=int, default=0, help='which gpu to use')
 parser.add_argument('--seed', type=int, default=100, help='random seed.')
+parser.add_argument("--sup_contra", type=eval, choices=[True, False], default='True', help="whether to use supervised contrastive learning or baseline")
+parser.add_argument('--lamb', type=float, default=1., help='lamb value for supervised contrastive loss')  # 0.01
+parser.add_argument('--delta', type=float, default=10.0, help='abnormal threshold')
 args = parser.parse_args()
         
 if args.dataset == 'METRLA':
@@ -227,6 +266,7 @@ logger.info('steps', args.steps)
 logger.info('lr_decay_ratio', args.lr_decay_ratio)
 logger.info('use_curriculum_learning', args.use_curriculum_learning)
 logger.info('cl_decay_steps', args.cl_decay_steps)
+logger.info('sup_contra', args.sup_contra)
 
 cpu_num = 1
 os.environ ['OMP_NUM_THREADS'] = str(cpu_num)
