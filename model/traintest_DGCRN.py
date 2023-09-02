@@ -28,7 +28,7 @@ def get_model():
     model = DGCRN(num_nodes=args.num_nodes, input_dim=args.input_dim, output_dim=args.output_dim, horizon=args.horizon, 
                  rnn_units=args.rnn_units, rnn_layers=args.rnn_layers, embed_dim=args.embed_dim, cheb_k = args.max_diffusion_step, 
                  cl_decay_steps=args.cl_decay_steps, use_curriculum_learning=args.use_curriculum_learning,
-                 delta=args.delta, sup_contra=args.sup_contra, scaler=scaler).to(device)
+                 delta=args.delta, sup_contra=args.sup_contra, scaler=scaler, fn_t=args.fn_t, temp=args.temp, top_k=args.top_k).to(device)
     return model
 
 def prepare_x_y(x, y):
@@ -42,7 +42,7 @@ def prepare_x_y(x, y):
     """
     x0 = x[..., :args.input_dim]
     y0 = y[..., :args.output_dim]
-    y1 = y[..., args.output_dim:]
+    y1 = y[..., args.output_dim:-1]  #* input_dim = 3 rather than 2 due to addition of history average
     x0 = torch.from_numpy(x0).float()
     y0 = torch.from_numpy(y0).float()
     y1 = torch.from_numpy(y1).float()
@@ -74,7 +74,7 @@ def evaluate(model, mode):
                 x_cov, x_his, y_his = None, None, None
             else:
                 x, x_cov, x_his, y, y_cov, y_his = prepare_x_y_with_his(x, y)
-            output = model(x, y_cov, x_cov=x_cov, x_his=x_his, y_his=y_his)
+            output, _ = model(x, y_cov, x_cov=x_cov, x_his=x_his, y_his=y_his)
             y_pred = scaler.inverse_transform(output)
             y_true = scaler.inverse_transform(y)
             ys_true.append(y_true)
@@ -126,12 +126,11 @@ def traintest_model():
                 x_cov, x_his, y_his = None, None, None
             else:
                 x, x_cov, x_his, y, y_cov, y_his = prepare_x_y_with_his(x, y)
-            output = model(x, y_cov, y, x_cov=x_cov, x_his=x_his, y_his=y_his, batches_seen=batches_seen)
+            output, contra_loss = model(x, y_cov, y, x_cov=x_cov, x_his=x_his, y_his=y_his, batches_seen=batches_seen)
             y_pred = scaler.inverse_transform(output)
             y_true = scaler.inverse_transform(y)
             loss = masked_mae_loss(y_pred, y_true) # masked_mae_loss(y_pred, y_true)
             if args.sup_contra:
-                contra_loss = 1
                 mae_losses.append(loss.item())
                 contra_losses.append(contra_loss.item())
                 loss = loss + args.lamb * contra_loss
@@ -199,9 +198,12 @@ parser.add_argument("--use_curriculum_learning", type=eval, choices=[True, False
 parser.add_argument("--cl_decay_steps", type=int, default=2000, help="cl_decay_steps")
 parser.add_argument('--gpu', type=int, default=0, help='which gpu to use')
 parser.add_argument('--seed', type=int, default=100, help='random seed.')
-parser.add_argument("--sup_contra", type=eval, choices=[True, False], default='True', help="whether to use supervised contrastive learning or baseline")
+parser.add_argument("--sup_contra", type=eval, choices=[True, False], default='False', help="whether to use supervised contrastive learning or baseline")
 parser.add_argument('--lamb', type=float, default=1., help='lamb value for supervised contrastive loss')  # 0.01
 parser.add_argument('--delta', type=float, default=10.0, help='abnormal threshold')
+parser.add_argument('--fn_t', type=int, default=12, help='filter negatives threshold, 12 means 1 hour')
+parser.add_argument('--top_k', type=int, default=10, help='graph neighbors threshold, 10 means top 10 nodes')
+parser.add_argument('--temp', type=float, default=0.1, help='temperature parameter')
 args = parser.parse_args()
         
 if args.dataset == 'METRLA':
@@ -243,30 +245,34 @@ console.setFormatter(formatter)
 logger.addHandler(handler)
 logger.addHandler(console)
 
-logger.info('model', model_name)
-logger.info('dataset', args.dataset)
-logger.info('trainval_ratio', args.trainval_ratio)
-logger.info('val_ratio', args.val_ratio)
-logger.info('num_nodes', args.num_nodes)
-logger.info('seq_len', args.seq_len)
-logger.info('horizon', args.horizon)
-logger.info('input_dim', args.input_dim)
-logger.info('output_dim', args.output_dim)
-logger.info('rnn_layers', args.rnn_layers)
-logger.info('rnn_units', args.rnn_units)
-logger.info('embed_dim', args.embed_dim)
-logger.info('max_diffusion_step', args.max_diffusion_step)
-logger.info('loss', args.loss)
-logger.info('batch_size', args.batch_size)
-logger.info('epochs', args.epochs)
-logger.info('patience', args.patience)
-logger.info('lr', args.lr)
-logger.info('epsilon', args.epsilon)
-logger.info('steps', args.steps)
-logger.info('lr_decay_ratio', args.lr_decay_ratio)
-logger.info('use_curriculum_learning', args.use_curriculum_learning)
-logger.info('cl_decay_steps', args.cl_decay_steps)
-logger.info('sup_contra', args.sup_contra)
+# logger.info('model', model_name)
+# logger.info('dataset', args.dataset)
+# logger.info('trainval_ratio', args.trainval_ratio)
+# logger.info('val_ratio', args.val_ratio)
+# logger.info('num_nodes', args.num_nodes)
+# logger.info('seq_len', args.seq_len)
+# logger.info('horizon', args.horizon)
+# logger.info('input_dim', args.input_dim)
+# logger.info('output_dim', args.output_dim)
+# logger.info('rnn_layers', args.rnn_layers)
+# logger.info('rnn_units', args.rnn_units)
+# logger.info('embed_dim', args.embed_dim)
+# logger.info('max_diffusion_step', args.max_diffusion_step)
+# logger.info('loss', args.loss)
+# logger.info('batch_size', args.batch_size)
+# logger.info('epochs', args.epochs)
+# logger.info('patience', args.patience)
+# logger.info('lr', args.lr)
+# logger.info('epsilon', args.epsilon)
+# logger.info('steps', args.steps)
+# logger.info('lr_decay_ratio', args.lr_decay_ratio)
+# logger.info('use_curriculum_learning', args.use_curriculum_learning)
+# logger.info('cl_decay_steps', args.cl_decay_steps)
+# logger.info('sup_contra', args.sup_contra)
+# logger.info('lamb', args.lamb)
+# logger.info('delta', args.delta)
+message = ''.join([f'{k}: {v}\n' for k, v in vars(args).items()])
+logger.info(message)
 
 cpu_num = 1
 os.environ ['OMP_NUM_THREADS'] = str(cpu_num)

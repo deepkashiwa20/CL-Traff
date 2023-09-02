@@ -121,7 +121,7 @@ class ADCRNN_Decoder(nn.Module):
 class DGCRN(nn.Module):
     def __init__(self, num_nodes, input_dim, output_dim, horizon, rnn_units, rnn_layers=1, cheb_k=3,
                  ycov_dim=1, embed_dim=10, cl_decay_steps=2000, use_curriculum_learning=True,
-                 delta=10., sup_contra=False, scaler=None):
+                 delta=10., sup_contra=False, scaler=None, fn_t=12, temp=0.1, top_k=10):
         super(DGCRN, self).__init__()
         self.num_nodes = num_nodes
         self.input_dim = input_dim
@@ -137,6 +137,9 @@ class DGCRN(nn.Module):
         self.delta = delta
         self.sup_contra = sup_contra
         self.scaler = scaler
+        self.fn_t = fn_t
+        self.temp = temp
+        self.top_k = top_k
         
         # encoder
         self.encoder = ADCRNN_Encoder(self.num_nodes, self.input_dim, self.rnn_units, self.cheb_k, self.rnn_layers)
@@ -158,15 +161,93 @@ class DGCRN(nn.Module):
     def get_pseudo_labels(self, x, x_his):
         x = self.scaler.inverse_transform(x)
         diff = (x - x_his).abs()
-        pseudo_labels = (diff <= self.delta).squeeze(-1)  # (B, T, N)
-        return pseudo_labels.sum(1) 
+        pseudo_labels = (diff <= self.delta).squeeze(-1)  # (B, T, N) True means normal speed
+        return pseudo_labels.sum(1)  # regard T as whole
+    
+    def filter_negative(self, input_, thres):
+        times = input_[:, 0, 0, 0]
+        m = []
+        c = thres / 288
+        for t in times:
+            if t < c:
+                st = times < 0
+                gt = torch.logical_and(times <= (1 + t - c), times >= (t + c))
+            elif t > (1 - c):
+                st = torch.logical_and(times <= (t - c), times >= (c + t - 1))
+                gt = times > 1
+            else:
+                st = times <= (t - c)
+                gt = times >= (t + c)
             
+            res = torch.logical_or(st, gt).view(1, -1)  # exclude itself
+            m.append(res)
+        m = torch.cat(m)
+        return m
+    
+    def supervised_contrastive_loss(self, inputs, rep, labels, support):
+        """
+            inputs: input (bs, T, node, in_dim) in_dim=1, i.e., time slot
+            rep: original representation, (bs, node, dim)
+            labels: normal or abnormal flag, (bs, node)
+            support: adaptive graph
+            return: contra_loss, i.e., supervised contrastive loss
+        """
+        
+        #* temporal contrast
+        temporal_labels = labels.transpose(0, 1).unsqueeze(-1) ^ labels.transpose(0, 1).unsqueeze(1)  # (node, bs, bs)  # False: same label
+        tempo_rep = rep.transpose(0,1) # (node, bs, dim)
+        temporal_matrix = torch.exp(torch.cosine_similarity(tempo_rep.unsqueeze(1), tempo_rep.unsqueeze(2), dim=-1) / self.temp)  # (node, bs, bs)
+
+        # temporal negative filter
+        if self.fn_t:
+            temporal_mask = self.filter_negative(inputs, self.fn_t)  # easy negatives from temporal perspective, i.e., distant time
+        #* same label as current node
+        temporal_diag = torch.eye(inputs.shape[0], dtype=torch.bool).to(self.device)  # (bs, bs)
+        temporal_pos1 = temporal_matrix * ~temporal_labels * (~temporal_mask - temporal_diag)  # regard those nodes with same label and close to current time as positives
+        temporal_neg1 = temporal_matrix * ~temporal_labels * temporal_mask  # regard those nodes with same label and distant to current time as negatives
+        #* different label from current node
+        # regard those nodes with different label and close to current time as hard negatives, ignore them due to the difficulty!!!
+        # then regard those nodes with different label and distant to current time as negatives
+        temporal_neg2 = temporal_matrix * temporal_labels * temporal_mask
+        temporal_pos = torch.sum(temporal_pos1, dim=-1)  # (bs, node)
+        temporal_neg = torch.sum(temporal_neg1, dim=-1) + torch.sum(temporal_neg2, dim=-1)
+
+        #* spatial contrast
+        spatial_labels = labels.unsqueeze(-1) ^ labels.unsqueeze(1)  # (bs, node, node)  # False: same label 
+        spatial_matrix = torch.exp(torch.cosine_similarity(rep.unsqueeze(1), rep.unsqueeze(2), dim=-1) / self.temp)  # (bs, node, node)
+        
+        # first-order neighbor filter
+        _, indices = torch.topk(support, k=self.top_k+1, dim=-1)  # (node, k+1)
+        spatial_diag = torch.eye(self.num_nodes, dtype=torch.bool).to(self.device)
+        spatial_mask = torch.zeros((self.num_nodes, self.num_nodes), dtype=torch.bool).to(self.device)
+        spatial_mask[torch.arange(spatial_mask.size(0)).unsqueeze(1), indices] = True
+        spatial_mask = spatial_mask - spatial_diag
+        #* same label as current node
+        spatial_pos1 = spatial_matrix * ~spatial_labels * spatial_mask  # regard those nodes with same label and close to current node as positives
+        spatial_neg1 = spatial_matrix * ~spatial_labels * ~spatial_mask  # regard those nodes with same label and distant to current node as negatives
+        #* different label from current node
+        # regard those nodes with different label and close to current node as hard negatives, ignore them due to the difficulty!!!
+        # then regard those nodes with different label and distant to current node as negatives
+        spatial_neg2 = spatial_matrix * spatial_labels * ~spatial_mask
+        spatial_pos = torch.sum(spatial_pos1, dim=-1)  # (bs, node)
+        spatial_neg = torch.sum(spatial_neg1, dim=-1) + torch.sum(spatial_neg2, dim=-1)
+
+        ratio = (temporal_pos + spatial_pos) / (temporal_pos + spatial_pos + temporal_neg + spatial_neg)
+        contra_loss = torch.mean(-torch.log(ratio))
+        return contra_loss
+         
     def forward(self, x, y_cov, labels=None, x_cov=None, x_his=None, y_his=None, batches_seen=None):
         support = F.softmax(F.relu(torch.mm(self.node_embeddings, self.node_embeddings.transpose(0, 1))), dim=1)
         supports_en = [support]
         init_state = self.encoder.init_hidden(x.shape[0])
         h_en, state_en = self.encoder(x, init_state, supports_en) # B, T, N, hidden
         h_t = h_en[:, -1, :, :] # B, N, hidden (last state)        
+        
+        contra_loss = None
+        #* supervised contrastive learning 
+        if labels is not None and x_his is not None:
+            pseudo_labels = self.get_pseudo_labels(x, x_his)
+            contra_loss = self.supervised_contrastive_loss(x_cov, h_t, pseudo_labels, support)
         
         node_embeddings = self.hypernet(h_t) # B, N, d
         support = F.softmax(F.relu(torch.einsum('bnc,bmc->bnm', node_embeddings, node_embeddings)), dim=-1) 
@@ -185,7 +266,7 @@ class DGCRN(nn.Module):
                     go = labels[:, t, ...]
         output = torch.stack(out, dim=1)
         
-        return output
+        return output, contra_loss
 
 def print_params(model):
     # print trainable params
