@@ -197,8 +197,7 @@ parser.add_argument("--max_grad_norm", type=int, default=5, help="max_grad_norm"
 parser.add_argument("--use_curriculum_learning", type=eval, choices=[True, False], default='True', help="use_curriculum_learning")
 parser.add_argument("--cl_decay_steps", type=int, default=2000, help="cl_decay_steps")
 parser.add_argument('--gpu', type=int, default=0, help='which gpu to use')
-# TODO: add new parameters
-parser.add_argument('--seed', type=int, default=2024, help='random seed.')
+parser.add_argument('--seed', type=int, default=100, help='random seed.')
 parser.add_argument("--sup_contra", type=eval, choices=[True, False], default='True', help="whether to use supervised contrastive learning or baseline")
 parser.add_argument('--lamb', type=float, default=1., help='lamb value for supervised contrastive loss')  # 0.01
 parser.add_argument('--delta', type=float, default=10.0, help='abnormal threshold')

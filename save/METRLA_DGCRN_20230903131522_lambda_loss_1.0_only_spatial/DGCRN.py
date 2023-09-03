@@ -199,23 +199,23 @@ class DGCRN(nn.Module):
             return: contra_loss, i.e., supervised contrastive loss
         """
         
-        #* temporal contrast
-        temporal_labels = labels.transpose(0, 1).unsqueeze(-1) ^ labels.transpose(0, 1).unsqueeze(1)  # (node, bs, bs)  # False: same label
-        tempo_rep = rep.transpose(0, 1) # (node, bs, dim)
-        temporal_matrix = torch.exp(torch.cosine_similarity(tempo_rep.unsqueeze(1), tempo_rep.unsqueeze(2), dim=-1) / self.temp)  # (node, bs, bs)
+        # #* temporal contrast
+        # temporal_labels = labels.transpose(0, 1).unsqueeze(-1) ^ labels.transpose(0, 1).unsqueeze(1)  # (node, bs, bs)  # False: same label
+        # tempo_rep = rep.transpose(0, 1) # (node, bs, dim)
+        # temporal_matrix = torch.exp(torch.cosine_similarity(tempo_rep.unsqueeze(1), tempo_rep.unsqueeze(2), dim=-1) / self.temp)  # (node, bs, bs)
 
-        # temporal negative filter
-        if self.fn_t:  # easy negatives from temporal perspective, i.e., distant time
-            temporal_mask_exc, temporal_mask_inc = self.filter_negative(inputs, self.fn_t)  # mask_exc (mask_inc) means that exclude (include) current time 
-        #* same label as current node
-        temporal_pos1 = temporal_matrix * ~temporal_labels * ~temporal_mask_inc  # regard those nodes with same label and close to current time as positives
-        temporal_neg1 = temporal_matrix * ~temporal_labels * temporal_mask_exc # regard those nodes with same label and distant to current time as negatives
-        #* different label from current node
-        # regard those nodes with different label and close to current time as hard negatives, ignore them due to the difficulty!!!
-        # then regard those nodes with different label and distant to current time as negatives
-        temporal_neg2 = temporal_matrix * temporal_labels * temporal_mask_exc
-        temporal_pos = torch.sum(temporal_pos1, dim=-1)  # (bs, node)
-        temporal_neg = torch.sum(temporal_neg1, dim=-1) + torch.sum(temporal_neg2, dim=-1)
+        # # temporal negative filter
+        # if self.fn_t:  # easy negatives from temporal perspective, i.e., distant time
+        #     temporal_mask_exc, temporal_mask_inc = self.filter_negative(inputs, self.fn_t)  # mask_exc (mask_inc) means that exclude (include) current time 
+        # #* same label as current node
+        # temporal_pos1 = temporal_matrix * ~temporal_labels * ~temporal_mask_inc  # regard those nodes with same label and close to current time as positives
+        # temporal_neg1 = temporal_matrix * ~temporal_labels * temporal_mask_exc # regard those nodes with same label and distant to current time as negatives
+        # #* different label from current node
+        # # regard those nodes with different label and close to current time as hard negatives, ignore them due to the difficulty!!!
+        # # then regard those nodes with different label and distant to current time as negatives
+        # temporal_neg2 = temporal_matrix * temporal_labels * temporal_mask_exc
+        # temporal_pos = torch.sum(temporal_pos1, dim=-1)  # (bs, node)
+        # temporal_neg = torch.sum(temporal_neg1, dim=-1) + torch.sum(temporal_neg2, dim=-1)
 
         #* spatial contrast
         spatial_labels = labels.unsqueeze(-1) ^ labels.unsqueeze(1)  # (bs, node, node)  # False: same label 
@@ -235,9 +235,9 @@ class DGCRN(nn.Module):
         spatial_pos = torch.sum(spatial_pos1, dim=-1)  # (bs, node)
         spatial_neg = torch.sum(spatial_neg1, dim=-1) + torch.sum(spatial_neg2, dim=-1)
 
-        ratio = (temporal_pos.transpose(0,1) + spatial_pos + 1e-12) / (temporal_pos.transpose(0,1) + spatial_pos + temporal_neg.transpose(0,1) + spatial_neg)
+        # ratio = (temporal_pos.transpose(0,1) + spatial_pos + 1e-12) / (temporal_pos.transpose(0,1) + spatial_pos + temporal_neg.transpose(0,1) + spatial_neg)
         # ratio = (temporal_pos.transpose(0,1) + 1e-12) / (temporal_pos.transpose(0,1) + temporal_neg.transpose(0,1))  # only temporal
-        # ratio = (spatial_pos + 1e-12) / (spatial_pos + spatial_neg)  # only spatial
+        ratio = (spatial_pos + 1e-12) / (spatial_pos + spatial_neg)  # only spatial
         contra_loss = torch.mean(-torch.log(ratio))
         return contra_loss
          
