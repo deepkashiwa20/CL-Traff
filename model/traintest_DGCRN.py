@@ -298,7 +298,7 @@ scaler = StandardScaler(mean=data['x_train'][..., 0].mean(), std=data['x_train']
 for category in ['train', 'val', 'test']:
     data['x_' + category][..., 0] = scaler.transform(data['x_' + category][..., 0])
     data['y_' + category][..., 0] = scaler.transform(data['y_' + category][..., 0])
-data['train_loader'] = DataLoader(data['x_train'], data['y_train'], args.batch_size, shuffle=True)
+data['train_loader'] = DataLoader(data['x_train'], data['y_train'], args.batch_size, shuffle=False)  # True
 data['val_loader'] = DataLoader(data['x_val'], data['y_val'], args.batch_size, shuffle=False)
 data['test_loader'] = DataLoader(data['x_test'], data['y_test'], args.batch_size, shuffle=False)
 
