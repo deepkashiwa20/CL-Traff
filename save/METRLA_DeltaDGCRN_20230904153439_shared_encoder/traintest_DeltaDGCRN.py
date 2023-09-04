@@ -203,7 +203,7 @@ else:
 
 model_name = 'DeltaDGCRN'
 timestring = time.strftime('%Y%m%d%H%M%S', time.localtime())
-path = f'../save/{args.dataset}_{model_name}_{timestring}'
+path = f'../save/{args.dataset}_{model_name}_{timestring}' + '_shared_encoder'
 logging_path = f'{path}/{model_name}_{timestring}_logging.txt'
 score_path = f'{path}/{model_name}_{timestring}_scores.txt'
 epochlog_path = f'{path}/{model_name}_{timestring}_epochlog.txt'

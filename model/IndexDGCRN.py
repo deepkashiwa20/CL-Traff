@@ -143,7 +143,7 @@ class DeltaDGCRN(nn.Module):
         
         # encoder
         self.encoder = ADCRNN_Encoder(self.num_nodes, self.input_dim, self.rnn_units, self.cheb_k, self.rnn_layers)
-        # self.encoder1 = ADCRNN_Encoder(self.num_nodes, self.input_dim, self.rnn_units, self.cheb_k, self.rnn_layers)
+        self.encoder1 = ADCRNN_Encoder(self.num_nodes, self.input_dim, self.rnn_units, self.cheb_k, self.rnn_layers)
         
         # deocoder
         self.decoder_dim = self.rnn_units
@@ -169,6 +169,83 @@ class DeltaDGCRN(nn.Module):
         diff = (x - x_his).abs()
         pseudo_labels = (diff <= self.delta)  # (B, T, N, 1) True means normal speed
         return pseudo_labels
+    
+    def filter_negative(self, input_, thres):
+        times = input_[:, 0, 0, 0]
+        m, m_inc = [], []
+        cnt = 0
+        c = thres / 288
+        for t in times:
+            if t < c:
+                st = times < 0
+                gt = torch.logical_and(times <= (1 + t - c), times >= (t + c))
+            elif t > (1 - c):
+                st = torch.logical_and(times <= (t - c), times >= (c + t - 1))
+                gt = times > 1
+            else:
+                st = times <= (t - c)
+                gt = times >= (t + c)
+            
+            res = torch.logical_or(st, gt).view(1, -1)  # exclude itself
+            res_inc = res.clone()
+            res_inc[0, cnt] = True  # include itself
+            cnt += 1
+            m.append(res)
+            m_inc.append(res_inc)
+        m = torch.cat(m)
+        m_inc = torch.cat(m_inc)
+        return m, m_inc
+    
+    def supervised_contrastive_loss(self, inputs, rep, labels, support):
+        """
+            inputs: input (bs, T, node, in_dim) in_dim=1, i.e., time slot
+            rep: original representation, (bs, node, dim)
+            labels: normal or abnormal flag, (bs, node), True: normal
+            support: adaptive graph
+            return: contra_loss, i.e., supervised contrastive loss
+        """
+        
+        #* temporal contrast
+        temporal_labels = labels.transpose(0, 1).unsqueeze(-1) ^ labels.transpose(0, 1).unsqueeze(1)  # (node, bs, bs)  # False: same label
+        tempo_rep = rep.transpose(0, 1) # (node, bs, dim)
+        temporal_matrix = torch.exp(torch.cosine_similarity(tempo_rep.unsqueeze(1), tempo_rep.unsqueeze(2), dim=-1) / self.temp)  # (node, bs, bs)
+
+        # temporal negative filter
+        if self.fn_t:  # easy negatives from temporal perspective, i.e., distant time
+            temporal_mask_exc, temporal_mask_inc = self.filter_negative(inputs, self.fn_t)  # mask_exc (mask_inc) means that exclude (include) current time 
+        #* same label as current node
+        temporal_pos1 = temporal_matrix * ~temporal_labels * ~temporal_mask_inc  # regard those nodes with same label and close to current time as positives
+        temporal_neg1 = temporal_matrix * ~temporal_labels * temporal_mask_exc # regard those nodes with same label and distant to current time as negatives
+        #* different label from current node
+        # regard those nodes with different label and close to current time as hard negatives, ignore them due to the difficulty!!!
+        # then regard those nodes with different label and distant to current time as negatives
+        temporal_neg2 = temporal_matrix * temporal_labels * temporal_mask_exc
+        temporal_pos = torch.sum(temporal_pos1, dim=-1)  # (bs, node)
+        temporal_neg = torch.sum(temporal_neg1, dim=-1) + torch.sum(temporal_neg2, dim=-1)
+
+        #* spatial contrast
+        spatial_labels = labels.unsqueeze(-1) ^ labels.unsqueeze(1)  # (bs, node, node)  # False: same label 
+        spatial_matrix = torch.exp(torch.cosine_similarity(rep.unsqueeze(1), rep.unsqueeze(2), dim=-1) / self.temp)  # (bs, node, node)
+        
+        # first-order neighbor filter
+        _, indices = torch.topk(support, k=self.top_k+1, dim=-1)  # (node, k+1)  # TODO cannot guarantee that the first index is in diagonal ?!
+        spatial_mask = torch.zeros((self.num_nodes, self.num_nodes), dtype=torch.bool).to(inputs.device)
+        spatial_mask[torch.arange(spatial_mask.size(0)).unsqueeze(1), indices[:, 1:]] = True  # exclude itself
+        #* same label as current node
+        spatial_pos1 = spatial_matrix * ~spatial_labels * spatial_mask  # regard those nodes with same label and close to current node as positives
+        spatial_neg1 = spatial_matrix * ~spatial_labels * ~spatial_mask  # regard those nodes with same label and distant to current node as negatives
+        #* different label from current node
+        # regard those nodes with different label and close to current node as hard negatives, ignore them due to the difficulty!!!
+        # then regard those nodes with different label and distant to current node as negatives
+        spatial_neg2 = spatial_matrix * spatial_labels * ~spatial_mask
+        spatial_pos = torch.sum(spatial_pos1, dim=-1)  # (bs, node)
+        spatial_neg = torch.sum(spatial_neg1, dim=-1) + torch.sum(spatial_neg2, dim=-1)
+
+        ratio = (temporal_pos.transpose(0,1) + spatial_pos + 1e-12) / (temporal_pos.transpose(0,1) + spatial_pos + temporal_neg.transpose(0,1) + spatial_neg)
+        # ratio = (temporal_pos.transpose(0,1) + 1e-12) / (temporal_pos.transpose(0,1) + temporal_neg.transpose(0,1))  # only temporal
+        # ratio = (spatial_pos + 1e-12) / (spatial_pos + spatial_neg)  # only spatial
+        contra_loss = torch.mean(-torch.log(ratio))
+        return contra_loss
          
     def forward(self, x, y_cov, labels=None, x_cov=None, x_his=None, y_his=None, batches_seen=None):
         support_normal = F.softmax(F.relu(torch.mm(self.node_embeddings_normal, self.node_embeddings_normal.transpose(0, 1))), dim=1)
@@ -182,7 +259,7 @@ class DeltaDGCRN(nn.Module):
         x_abnormal = x * ~normal_mask
         h_en_normal, state_en_normal = self.encoder(x_normal, init_state, supports_en_normal) # B, T, N, hidden
         h_t_normal = h_en_normal[:, -1, :, :] # B, N, hidden (last state)    
-        h_en_abnormal, state_en_abnormal = self.encoder(x_abnormal, init_state, supports_en_abnormal) # B, T, N, hidden
+        h_en_abnormal, state_en_abnormal = self.encoder1(x_abnormal, init_state, supports_en_abnormal) # B, T, N, hidden
         h_t_abnormal = h_en_abnormal[:, -1, :, :] # B, N, hidden (last state)     
         
         node_embeddings_normal = self.hypernet_normal(h_t_normal) # B, N, d
@@ -247,7 +324,7 @@ def main():
     parser.add_argument('--rnn_units', type=int, default=64, help='number of hidden units')
     args = parser.parse_args()
     device = torch.device("cuda:{}".format(args.gpu)) if torch.cuda.is_available() else torch.device("cpu")
-    model = DeltaDGCRN(num_nodes=args.num_variable, input_dim=args.channelin, output_dim=args.channelout, horizon=args.seq_len, rnn_units=args.rnn_units).to(device)
+    model = DGCRN(num_nodes=args.num_variable, input_dim=args.channelin, output_dim=args.channelout, horizon=args.seq_len, rnn_units=args.rnn_units).to(device)
     summary(model, [(args.his_len, args.num_variable, args.channelin), (args.seq_len, args.num_variable, args.channelout)], device=device)
     print_params(model)
     
