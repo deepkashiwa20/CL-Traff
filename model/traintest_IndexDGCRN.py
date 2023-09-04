@@ -12,7 +12,7 @@ from torchsummary import summary
 import argparse
 import logging
 from utils import StandardScaler, DataLoader, masked_mae_loss, masked_mape_loss, masked_mse_loss, masked_rmse_loss
-from DeltaDGCRN import DeltaDGCRN
+from IndexDGCRN import IndexDGCRN
 
 def print_model(model):
     param_count = 0
@@ -25,10 +25,10 @@ def print_model(model):
     return
 
 def get_model():  
-    model = DeltaDGCRN(num_nodes=args.num_nodes, input_dim=args.input_dim, output_dim=args.output_dim, horizon=args.horizon, 
+    model = IndexDGCRN(num_nodes=args.num_nodes, input_dim=args.input_dim, output_dim=args.output_dim, horizon=args.horizon, 
                  rnn_units=args.rnn_units, rnn_layers=args.rnn_layers, embed_dim=args.embed_dim, cheb_k = args.max_diffusion_step, 
                  cl_decay_steps=args.cl_decay_steps, use_curriculum_learning=args.use_curriculum_learning,
-                 delta=args.delta, scaler=scaler).to(device)
+                 delta=args.delta, sample=args.sample, granu=args.granu, scaler=scaler, temp=args.temp).to(device)
     return model
 
 def prepare_x_y(x, y):
@@ -74,7 +74,7 @@ def evaluate(model, mode):
                 x_cov, x_his, y_his = None, None, None
             else:
                 x, x_cov, x_his, y, y_cov, y_his = prepare_x_y_with_his(x, y)
-            output = model(x, y_cov, x_cov=x_cov, x_his=x_his, y_his=y_his)
+            output, _ = model(x, y_cov, x_cov=x_cov, x_his=x_his, y_his=y_his)
             y_pred = scaler.inverse_transform(output)
             y_true = scaler.inverse_transform(y)
             ys_true.append(y_true)
@@ -119,6 +119,7 @@ def traintest_model():
         model = model.train()
         data_iter = data['train_loader'].get_iterator()
         losses = []
+        mae_losses, contra_losses  = [], []
         for x, y in data_iter:
             optimizer.zero_grad()
             if not args.use_HA:
@@ -126,21 +127,32 @@ def traintest_model():
                 x_cov, x_his, y_his = None, None, None
             else:
                 x, x_cov, x_his, y, y_cov, y_his = prepare_x_y_with_his(x, y)
-            output = model(x, y_cov, y, x_cov=x_cov, x_his=x_his, y_his=y_his, batches_seen=batches_seen)
+            output, contra_loss = model(x, y_cov, y, x_cov=x_cov, x_his=x_his, y_his=y_his, batches_seen=batches_seen, memory=data['history_memory'])
             y_pred = scaler.inverse_transform(output)
             y_true = scaler.inverse_transform(y)
             loss = masked_mae_loss(y_pred, y_true) # masked_mae_loss(y_pred, y_true)
+            if args.sup_contra:
+                mae_losses.append(loss.item())
+                contra_losses.append(contra_loss.item())
+                loss = loss + args.lamb * contra_loss
             losses.append(loss.item())
             batches_seen += 1
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm) # gradient clipping - this does it in place
             optimizer.step()
         train_loss = np.mean(losses)
+        if args.sup_contra:
+            train_mae_loss = np.mean(mae_losses)
+            train_contra_loss = np.mean(contra_losses)
         lr_scheduler.step()
         val_loss, _, _ = evaluate(model, 'val')
         end_time2 = time.time()
-        message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.1f}s'.format(epoch_num + 1, 
-                args.epochs, batches_seen, train_loss, val_loss, optimizer.param_groups[0]['lr'], (end_time2 - start_time))
+        if not args.sup_contra:
+            message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.1f}s'.format(epoch_num + 1, 
+                   args.epochs, batches_seen, train_loss, val_loss, optimizer.param_groups[0]['lr'], (end_time2 - start_time))
+        else:
+            message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, train_mae_loss: {:.4f}, train_contra_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.1f}s'.format(epoch_num + 1, 
+                   args.epochs, batches_seen, train_loss, train_mae_loss, train_contra_loss, val_loss, optimizer.param_groups[0]['lr'], (end_time2 - start_time))
         logger.info(message)
         test_loss, _, _ = evaluate(model, 'test')
 
@@ -188,8 +200,13 @@ parser.add_argument("--cl_decay_steps", type=int, default=2000, help="cl_decay_s
 parser.add_argument('--gpu', type=int, default=0, help='which gpu to use')
 # TODO: add new parameters
 parser.add_argument('--seed', type=int, default=2024, help='random seed.')
+parser.add_argument("--sup_contra", type=eval, choices=[True, False], default='True', help="whether to use supervised contrastive learning or baseline")
 parser.add_argument('--delta', type=float, default=10.0, help='abnormal threshold')
 parser.add_argument("--use_HA", type=eval, choices=[True, False], default='True', help="whether to use history average in X")
+parser.add_argument('--granu', type=str, choices=['week', 'day', 'hour'], default='week', help='which granularity to sample history data')
+parser.add_argument('--sample', type=int, default=5, help='the number of sampled history memory.')
+parser.add_argument('--lamb', type=float, default=1., help='lamb value for supervised contrastive loss')  # 0.01
+parser.add_argument('--temp', type=float, default=1., help='temperature parameter')
 args = parser.parse_args()
         
 if args.dataset == 'METRLA':
@@ -203,7 +220,7 @@ else:
 
 model_name = 'DeltaDGCRN'
 timestring = time.strftime('%Y%m%d%H%M%S', time.localtime())
-path = f'../save/{args.dataset}_{model_name}_{timestring}' + '_different_encoder'
+path = f'../save/{args.dataset}_{model_name}_{timestring}'
 logging_path = f'{path}/{model_name}_{timestring}_logging.txt'
 score_path = f'{path}/{model_name}_{timestring}_scores.txt'
 epochlog_path = f'{path}/{model_name}_{timestring}_epochlog.txt'
@@ -286,6 +303,7 @@ for category in ['train', 'val', 'test']:
 data['train_loader'] = DataLoader(data['x_train'], data['y_train'], args.batch_size, shuffle=False)  # True
 data['val_loader'] = DataLoader(data['x_val'], data['y_val'], args.batch_size, shuffle=False)
 data['test_loader'] = DataLoader(data['x_test'], data['y_test'], args.batch_size, shuffle=False)
+data['history_memory'] = np.load(os.path.join(f'../{args.dataset}', f'train_index_{args.granu}' + '.npy'), allow_pickle=True).item()
 
 def main():
     logger.info(args.dataset, 'training and testing started', time.ctime())

@@ -432,3 +432,20 @@ Horizon overall: mae: 3.2101, mape: 0.0909, rmse: 6.4962
 Horizon 15mins: mae: 2.8403, mape: 0.0759, rmse: 5.4620 
 Horizon 30mins: mae: 3.2577, mape: 0.0925, rmse: 6.5730 
 Horizon 60mins: mae: 3.7260, mape: 0.1114, rmse: 7.6754 
+Epoch [81/200] (30375) train_loss: 2.6803, val_loss: 2.9651, lr: 0.001000, 149.2s 
+Horizon overall: mae: 3.2143, mape: 0.0919, rmse: 6.5052 
+Horizon 15mins: mae: 2.8414, mape: 0.0761, rmse: 5.4569 
+Horizon 30mins: mae: 3.2628, mape: 0.0935, rmse: 6.5831 
+Horizon 60mins: mae: 3.7338, mape: 0.1135, rmse: 7.6961 
+Epoch [82/200] (30750) train_loss: 2.6786, val_loss: 2.9634, lr: 0.001000, 150.0s 
+Horizon overall: mae: 3.2110, mape: 0.0908, rmse: 6.4936 
+Horizon 15mins: mae: 2.8380, mape: 0.0756, rmse: 5.4600 
+Horizon 30mins: mae: 3.2587, mape: 0.0924, rmse: 6.5717 
+Horizon 60mins: mae: 3.7283, mape: 0.1116, rmse: 7.6676 
+Early stopping at epoch: 81 
+===================================Best model performance=================================== 
+Horizon overall: mae: 3.1868, mape: 0.0899, rmse: 6.3896 
+Horizon 15mins: mae: 2.8256, mape: 0.0750, rmse: 5.4272 
+Horizon 30mins: mae: 3.2331, mape: 0.0914, rmse: 6.4616 
+Horizon 60mins: mae: 3.6955, mape: 0.1105, rmse: 7.5150 
+METRLA training and testing ended Mon Sep  4 19:36:57 2023

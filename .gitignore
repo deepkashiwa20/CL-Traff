@@ -1,5 +1,6 @@
 *.npz
 *.pt
+*.npy
 visualizations/results
 model/GCRN_old.py
 model/traintest+_GCRN_old.py

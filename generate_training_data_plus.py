@@ -7,7 +7,10 @@ import argparse
 import numpy as np
 import os
 import pandas as pd
-
+from collections import defaultdict
+WEEKDAYTIME = 7 * 24 * 12 - 1
+DAYTIME = 24 * 12
+HOURTIME = 12
 
 def generate_graph_seq2seq_io_data(data, x_offsets, y_offsets):
     """
@@ -47,7 +50,7 @@ def generate_train_val_test(args):
     # x: (num_samples, input_length, num_nodes, input_dim)
     # y: (num_samples, output_length, num_nodes, output_dim)
     x, y = generate_graph_seq2seq_io_data(data, x_offsets=x_offsets, y_offsets=y_offsets)
-
+    
     print("x shape: ", x.shape, ", y shape: ", y.shape)
     # Write the data into npz file.
     # num_test = 6831, using the last 6831 examples as testing.
@@ -66,8 +69,24 @@ def generate_train_val_test(args):
     )
     # test
     x_test, y_test = x[-num_test:], y[-num_test:]
-
-
+    
+    #* construct time index
+    index_week = defaultdict(list)  # 10
+    index_day = defaultdict(list)  # 100
+    index_hour = defaultdict(list)  # 1000
+    for x in x_train:
+        x_speed = x[:, :, [0]].astype(np.float32)  # (T, N, 1)
+        current_time = x[0, 0, 1]  # ['speed', 'weekdaytime', 'speed_y']
+        weekdaytime = int(current_time * WEEKDAYTIME)  # 0~2015  #* No 873?!
+        daytime = int(current_time * WEEKDAYTIME % DAYTIME)
+        hourtime = int(current_time * WEEKDAYTIME % DAYTIME // HOURTIME)
+        index_week[weekdaytime].append(x_speed)
+        index_day[daytime].append(x_speed)
+        index_hour[hourtime].append(x_speed)
+    np.save(os.path.join(args.output_dir, "train_index_week.npy"), index_week)
+    np.save(os.path.join(args.output_dir, "train_index_day.npy"), index_day)
+    np.save(os.path.join(args.output_dir, "train_index_hour.npy"), index_hour)
+    
     for cat in ["train", "val", "test"]:
         _x, _y = locals()["x_" + cat], locals()["y_" + cat]
         print(cat, "x: ", _x.shape, "y:", _y.shape)
