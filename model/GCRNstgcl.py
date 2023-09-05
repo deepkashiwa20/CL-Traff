@@ -195,7 +195,8 @@ class GCRN(nn.Module):
         times = input_[:, 0, 0, 0]
         m = []
         cnt = 0
-        c = thres / 288
+        # c = thres / 288
+        c = thres / 2016
         for t in times:
             if t < c:
                 st = times < 0

@@ -186,7 +186,7 @@ class DeltaDGCRN(nn.Module):
         h_t_abnormal = h_en_abnormal[:, -1, :, :] # B, N, hidden (last state)     
         
         node_embeddings_normal = self.hypernet_normal(h_t_normal) # B, N, d
-        node_embeddings_abnormal = self.hypernet_normal(h_t_abnormal) # B, N, d
+        node_embeddings_abnormal = self.hypernet_abnormal(h_t_abnormal) # B, N, d
         support_normal = F.softmax(F.relu(torch.einsum('bnc,bmc->bnm', node_embeddings_normal, node_embeddings_normal)), dim=-1) 
         supports_de_normal = [support_normal]
         support_abnormal = F.softmax(F.relu(torch.einsum('bnc,bmc->bnm', node_embeddings_abnormal, node_embeddings_abnormal)), dim=-1) 
