@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 
 import argparse
 import numpy as np
-import os
+import os, math
 import pandas as pd
 from collections import defaultdict
 WEEKDAYTIME = 7 * 24 * 12 - 1
@@ -77,9 +77,10 @@ def generate_train_val_test(args):
     for x in x_train:
         x_speed = x[:, :, [0]].astype(np.float32)  # (T, N, 1)
         current_time = x[0, 0, 1]  # ['speed', 'weekdaytime', 'speed_y']
-        weekdaytime = int(current_time * WEEKDAYTIME)  # 0~2015  #* No 873?!
-        daytime = int(current_time * WEEKDAYTIME % DAYTIME)
-        hourtime = int(current_time * WEEKDAYTIME % DAYTIME // HOURTIME)
+        weekdaytime = round(current_time * WEEKDAYTIME)  # 0~2015 
+        daytime = weekdaytime % DAYTIME
+        hourtime = weekdaytime % DAYTIME // HOURTIME
+        # print(current_time, current_time * WEEKDAYTIME, weekdaytime, daytime, hourtime)
         index_week[weekdaytime].append(x_speed)
         index_day[daytime].append(x_speed)
         index_hour[hourtime].append(x_speed)

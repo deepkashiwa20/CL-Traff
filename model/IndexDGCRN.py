@@ -179,10 +179,7 @@ class IndexDGCRN(nn.Module):
         samples = []
         initial_times = x_cov[:, 0, 0, 0] * GRANULARITY[self.granu]  # (B, )
         for t in initial_times:
-            sample_num = len(memory[int(t)])  #* t=873长度为0?!
-            while sample_num == 0:
-                t = t - 1
-                sample_num = len(memory[int(t)])
+            sample_num = len(memory[int(t)]) 
             if self.sample >= sample_num:
                 idxs = np.random.randint(0, sample_num, size=self.sample - sample_num)  # 有重复
                 sample_t = memory[int(t)] + [memory[int(t)][id] for id in idxs]
@@ -292,7 +289,7 @@ class IndexDGCRN(nn.Module):
         contra_loss = None
         if labels is not None and x_his is not None:
             # sample history memory
-            history_sample = self.sample_history_memory(x_cov, memory)  # (B*K, T, N, 1)
+            history_sample = self.scaler.transform(self.sample_history_memory(x_cov, memory))  # (B*K, T, N, 1)
             pseudo_labels = self.get_pseudo_labels(x, x_his)  # (B, N)
             memory_labels = self.get_memory_labels(history_sample, x_his)  # (B*K, N)
             init_state = self.encoder.init_hidden(history_sample.shape[0])
