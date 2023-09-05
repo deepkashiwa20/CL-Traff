@@ -74,7 +74,7 @@ def evaluate(model, mode):
                 x_cov, x_his, y_his = None, None, None
             else:
                 x, x_cov, x_his, y, y_cov, y_his = prepare_x_y_with_his(x, y)
-            output, _ = model(x, y_cov, x_cov=x_cov, x_his=x_his, y_his=y_his, memory=data['history_memory'])
+            output, _ = model(x, y_cov, x_cov=x_cov, x_his=x_his, y_his=y_his)
             y_pred = scaler.inverse_transform(output)
             y_true = scaler.inverse_transform(y)
             ys_true.append(y_true)
