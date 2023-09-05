@@ -4,6 +4,12 @@ import torch.nn as nn
 import math
 import numpy as np
 
+GRANULARITY = {
+    'week': 2015,
+    'day': 288,
+    'hour': 12
+}
+
 class AGCN(nn.Module):
     def __init__(self, dim_in, dim_out, cheb_k):
         super(AGCN, self).__init__()
@@ -118,11 +124,11 @@ class ADCRNN_Decoder(nn.Module):
         return current_inputs, output_hidden
 
 
-class DeltaDGCRN(nn.Module):
+class IndexDGCRN(nn.Module):
     def __init__(self, num_nodes, input_dim, output_dim, horizon, rnn_units, rnn_layers=1, cheb_k=3,
                  ycov_dim=1, embed_dim=10, cl_decay_steps=2000, use_curriculum_learning=True,
-                 delta=10., sup_contra=False, scaler=None, fn_t=12, temp=0.1, top_k=10):
-        super(DeltaDGCRN, self).__init__()
+                 delta=10., sample=20, granu='week', temp=1., scaler=None):
+        super(IndexDGCRN, self).__init__()
         self.num_nodes = num_nodes
         self.input_dim = input_dim
         self.rnn_units = rnn_units
@@ -135,31 +141,24 @@ class DeltaDGCRN(nn.Module):
         self.cl_decay_steps = cl_decay_steps
         self.use_curriculum_learning = use_curriculum_learning
         self.delta = delta
-        self.sup_contra = sup_contra
-        self.scaler = scaler
-        self.fn_t = fn_t
+        self.sample = sample
+        self.granu = granu
         self.temp = temp
-        self.top_k = top_k
+        self.scaler = scaler
         
         # encoder
         self.encoder = ADCRNN_Encoder(self.num_nodes, self.input_dim, self.rnn_units, self.cheb_k, self.rnn_layers)
-        # self.encoder1 = ADCRNN_Encoder(self.num_nodes, self.input_dim, self.rnn_units, self.cheb_k, self.rnn_layers)
         
         # deocoder
         self.decoder_dim = self.rnn_units
-        self.decoder_normal = ADCRNN_Decoder(self.num_nodes, self.output_dim + self.ycov_dim, self.decoder_dim, self.cheb_k, self.rnn_layers)
-        self.decoder_abnormal = ADCRNN_Decoder(self.num_nodes, self.output_dim + self.ycov_dim, self.decoder_dim, self.cheb_k, self.rnn_layers)
+        self.decoder = ADCRNN_Decoder(self.num_nodes, self.output_dim + self.ycov_dim, self.decoder_dim, self.cheb_k, self.rnn_layers)
 
         # output
-        self.proj_normal = nn.Sequential(nn.Linear(self.decoder_dim, self.output_dim, bias=True))
-        self.proj_abnormal = nn.Sequential(nn.Linear(self.decoder_dim, self.output_dim, bias=True))
-        self.proj = nn.Sequential(nn.Linear(2 * self.output_dim, self.output_dim, bias=True))
+        self.proj = nn.Sequential(nn.Linear(self.decoder_dim, self.output_dim, bias=True))
         
         # graph
-        self.node_embeddings_normal = nn.Parameter(torch.randn(self.num_nodes, self.embed_dim), requires_grad=True)
-        self.node_embeddings_abnormal = nn.Parameter(torch.randn(self.num_nodes, self.embed_dim), requires_grad=True)
-        self.hypernet_normal = nn.Sequential(nn.Linear(self.rnn_units, self.embed_dim, bias=True))
-        self.hypernet_abnormal = nn.Sequential(nn.Linear(self.rnn_units, self.embed_dim, bias=True))
+        self.node_embeddings = nn.Parameter(torch.randn(self.num_nodes, self.embed_dim), requires_grad=True)
+        self.hypernet = nn.Sequential(nn.Linear(self.rnn_units, self.embed_dim, bias=True))
         
     def compute_sampling_threshold(self, batches_seen):
         return self.cl_decay_steps / (self.cl_decay_steps + np.exp(batches_seen / self.cl_decay_steps))
@@ -167,60 +166,79 @@ class DeltaDGCRN(nn.Module):
     def get_pseudo_labels(self, x, x_his):
         x = self.scaler.inverse_transform(x)
         diff = (x - x_his).abs()
-        pseudo_labels = (diff <= self.delta)  # (B, T, N, 1) True means normal speed
-        return pseudo_labels
+        pseudo_labels = (diff <= self.delta).squeeze(-1)  # (B, T, N) True means normal speed
+        return pseudo_labels.sum(1) > 0  # regard T as whole
+    
+    def get_memory_labels(self, x, x_his):
+        x = x.reshape(-1, self.sample, self.horizon, self.num_nodes, self.input_dim)  # (B*K, T, N, 1) -> (B, K, T, N, 1)
+        diff = (x - x_his.unsqueeze(1)).abs()
+        pseudo_labels = (diff <= self.delta).reshape(-1, self.horizon, self.num_nodes)  # (B*K, T, N) True means normal speed
+        return pseudo_labels.sum(1) > 0  # regard T as whole
+    
+    def sample_history_memory(self, x_cov, memory):
+        samples = []
+        initial_times = x_cov[:, 0, 0, 0] * GRANULARITY[self.granu]  # (B, )
+        for t in initial_times:
+            sample_num = len(memory[int(t)]) 
+            if self.sample >= sample_num:
+                idxs = np.random.randint(0, sample_num, size=self.sample - sample_num)  # 有重复
+                sample_t = memory[int(t)] + [memory[int(t)][id] for id in idxs]
+            else:
+                idxs = np.random.choice(sample_num, size=self.sample, replace=False)  # 无重复
+                sample_t = torch.from_numpy(np.array([memory[int(t)][id] for id in idxs])).to(x_cov.device)
+            samples.append(sample_t)  # (self.sample, T, N, 1)
+        return torch.stack(samples, dim=0).reshape(-1, self.horizon, self.num_nodes, self.input_dim)  # (B * self.sample, T, N, 1)
          
-    def forward(self, x, y_cov, labels=None, x_cov=None, x_his=None, y_his=None, batches_seen=None):
-        support_normal = F.softmax(F.relu(torch.mm(self.node_embeddings_normal, self.node_embeddings_normal.transpose(0, 1))), dim=1)
-        supports_en_normal = [support_normal]
-        support_abnormal = F.softmax(F.relu(torch.mm(self.node_embeddings_abnormal, self.node_embeddings_abnormal.transpose(0, 1))), dim=1)
-        supports_en_abnormal = [support_abnormal]
-        
+    def memory_contrastive_loss(self, x_cov, h_t, h_t_memory, labels, memory_labels, support):
+        h_t_memory = h_t_memory.reshape(-1, self.sample, self.num_nodes, self.rnn_units).transpose(1, 2)  # (B, K, N, D)->(B, N, K, D)
+        memory_labels = memory_labels.reshape(-1, self.sample, self.num_nodes)  # (B, K, N)
+        flags = labels.unsqueeze(1) ^ memory_labels  # (B, K, N)  False: same label
+        sim_matrix = torch.exp(F.cosine_similarity(h_t.unsqueeze(2), h_t_memory, dim=-1).transpose(1, 2) / self.temp)  # (B, K, N)
+        pos_score = (sim_matrix * ~flags).sum(1) 
+        neg_score = (sim_matrix * flags).sum(1) 
+        ratio = (pos_score + 1e-12) / (pos_score + neg_score)
+        contra_loss = torch.mean(-torch.log(ratio))
+        return contra_loss, sim_matrix
+    
+    def forward(self, x, y_cov, labels=None, x_cov=None, x_his=None, y_his=None, batches_seen=None, memory=None):
+        support = F.softmax(F.relu(torch.mm(self.node_embeddings, self.node_embeddings.transpose(0, 1))), dim=1)
+        supports_en = [support]
         init_state = self.encoder.init_hidden(x.shape[0])
-        normal_mask = self.get_pseudo_labels(x, x_his)
-        x_normal = x * normal_mask
-        x_abnormal = x * ~normal_mask
-        h_en_normal, state_en_normal = self.encoder(x_normal, init_state, supports_en_normal) # B, T, N, hidden
-        h_t_normal = h_en_normal[:, -1, :, :] # B, N, hidden (last state)    
-        h_en_abnormal, state_en_abnormal = self.encoder(x_abnormal, init_state, supports_en_abnormal) # B, T, N, hidden
-        h_t_abnormal = h_en_abnormal[:, -1, :, :] # B, N, hidden (last state)     
+        h_en, state_en = self.encoder(x, init_state, supports_en) # B, T, N, hidden
+        h_t = h_en[:, -1, :, :] # B, N, hidden (last state)        
         
-        node_embeddings_normal = self.hypernet_normal(h_t_normal) # B, N, d
-        node_embeddings_abnormal = self.hypernet_abnormal(h_t_abnormal) # B, N, d
-        support_normal = F.softmax(F.relu(torch.einsum('bnc,bmc->bnm', node_embeddings_normal, node_embeddings_normal)), dim=-1) 
-        supports_de_normal = [support_normal]
-        support_abnormal = F.softmax(F.relu(torch.einsum('bnc,bmc->bnm', node_embeddings_abnormal, node_embeddings_abnormal)), dim=-1) 
-        supports_de_abnormal = [support_abnormal]
+        #* supervised contrastive learning 
+        history_sample = self.scaler.transform(self.sample_history_memory(x_cov, memory))  # (B*K, T, N, 1)
+        pseudo_labels = self.get_pseudo_labels(x, x_his)  # (B, N)
+        memory_labels = self.get_memory_labels(history_sample, x_his)  # (B*K, N)
+        init_state = self.encoder.init_hidden(history_sample.shape[0])
+        h_en_memory, state_en_memory = self.encoder(history_sample, init_state, supports_en) # B, T, N, hidden
+        h_t_memory = h_en_memory[:, -1, :, :] # B*K, N, hidden (last state) 
+        contra_loss = None
+        if x_his is not None:
+            # sample history memory
+            contra_loss, score_matirx = self.memory_contrastive_loss(x_cov, h_t, h_t_memory, pseudo_labels, memory_labels, support)
+        # fusion
+        h_t = h_t + torch.sum(torch.softmax(score_matirx, dim=1).unsqueeze(-1) * h_t_memory.reshape(-1, self.sample, self.num_nodes, self.rnn_units), dim=1) 
         
-        ht_list_normal = [h_t_normal]*self.rnn_layers
-        ht_list_abnormal = [h_t_abnormal]*self.rnn_layers
+        node_embeddings = self.hypernet(h_t) # B, N, d
+        support = F.softmax(F.relu(torch.einsum('bnc,bmc->bnm', node_embeddings, node_embeddings)), dim=-1) 
+        supports_de = [support]
         
+        ht_list = [h_t]*self.rnn_layers
         go = torch.zeros((x.shape[0], self.num_nodes, self.output_dim), device=x.device)
-        out_normal = []
+        out = []
         for t in range(self.horizon):
-            h_de, ht_list_normal = self.decoder_normal(torch.cat([go, y_cov[:, t, ...]], dim=-1), ht_list_normal, supports_de_normal)
-            go = self.proj_normal(h_de)
-            out_normal.append(go)
+            h_de, ht_list = self.decoder(torch.cat([go, y_cov[:, t, ...]], dim=-1), ht_list, supports_de)
+            go = self.proj(h_de)
+            out.append(go)
             if self.training and self.use_curriculum_learning:
                 c = np.random.uniform(0, 1)
                 if c < self.compute_sampling_threshold(batches_seen):
                     go = labels[:, t, ...]
-        output_normal = torch.stack(out_normal, dim=1)
+        output = torch.stack(out, dim=1)
         
-        go = torch.zeros((x.shape[0], self.num_nodes, self.output_dim), device=x.device)
-        out_abnormal = []
-        for t in range(self.horizon):
-            h_de, ht_list_abnormal = self.decoder_abnormal(torch.cat([go, y_cov[:, t, ...]], dim=-1), ht_list_abnormal, supports_de_abnormal)
-            go = self.proj_abnormal(h_de)
-            out_abnormal.append(go)
-            if self.training and self.use_curriculum_learning:
-                c = np.random.uniform(0, 1)
-                if c < self.compute_sampling_threshold(batches_seen):
-                    go = labels[:, t, ...]
-        output_abnormal = torch.stack(out_abnormal, dim=1)
-        
-        output = self.proj(torch.cat([output_normal, output_abnormal], dim=-1))
-        return output
+        return output, contra_loss
 
 def print_params(model):
     # print trainable params
@@ -247,7 +265,7 @@ def main():
     parser.add_argument('--rnn_units', type=int, default=64, help='number of hidden units')
     args = parser.parse_args()
     device = torch.device("cuda:{}".format(args.gpu)) if torch.cuda.is_available() else torch.device("cpu")
-    model = DeltaDGCRN(num_nodes=args.num_variable, input_dim=args.channelin, output_dim=args.channelout, horizon=args.seq_len, rnn_units=args.rnn_units).to(device)
+    model = IndexDGCRN(num_nodes=args.num_variable, input_dim=args.channelin, output_dim=args.channelout, horizon=args.seq_len, rnn_units=args.rnn_units).to(device)
     summary(model, [(args.his_len, args.num_variable, args.channelin), (args.seq_len, args.num_variable, args.channelout)], device=device)
     print_params(model)
     

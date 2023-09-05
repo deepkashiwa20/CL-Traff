@@ -74,7 +74,7 @@ def evaluate(model, mode):
                 x_cov, x_his, y_his = None, None, None
             else:
                 x, x_cov, x_his, y, y_cov, y_his = prepare_x_y_with_his(x, y)
-            output, _ = model(x, y_cov, x_cov=x_cov, x_his=x_his, y_his=y_his)
+            output, _ = model(x, y_cov, x_cov=x_cov, x_his=x_his, y_his=y_his, memory=data['history_memory'])
             y_pred = scaler.inverse_transform(output)
             y_true = scaler.inverse_transform(y)
             ys_true.append(y_true)
@@ -218,7 +218,7 @@ elif args.dataset == 'PEMSBAY':
 else:
     pass # including more datasets in the future    
 
-model_name = 'DeltaDGCRN'
+model_name = 'IndexDGCRN'
 timestring = time.strftime('%Y%m%d%H%M%S', time.localtime())
 path = f'../save/{args.dataset}_{model_name}_{timestring}'
 logging_path = f'{path}/{model_name}_{timestring}_logging.txt'
