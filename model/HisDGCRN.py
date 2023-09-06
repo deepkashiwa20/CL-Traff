@@ -4,12 +4,6 @@ import torch.nn as nn
 import math
 import numpy as np
 
-GRANULARITY = {
-    'week': 2015,
-    'day': 288,
-    'hour': 12
-}
-
 class AGCN(nn.Module):
     def __init__(self, dim_in, dim_out, cheb_k):
         super(AGCN, self).__init__()
@@ -124,11 +118,11 @@ class ADCRNN_Decoder(nn.Module):
         return current_inputs, output_hidden
 
 
-class IndexDGCRN(nn.Module):
+class HisDGCRN(nn.Module):
     def __init__(self, num_nodes, input_dim, output_dim, horizon, rnn_units, rnn_layers=1, cheb_k=3,
                  ycov_dim=1, embed_dim=10, cl_decay_steps=2000, use_curriculum_learning=True,
-                 delta=10., sample=20, granu='week', temp=1., scaler=None):
-        super(IndexDGCRN, self).__init__()
+                 delta=10., scaler=None):
+        super(HisDGCRN, self).__init__()
         self.num_nodes = num_nodes
         self.input_dim = input_dim
         self.rnn_units = rnn_units
@@ -141,9 +135,6 @@ class IndexDGCRN(nn.Module):
         self.cl_decay_steps = cl_decay_steps
         self.use_curriculum_learning = use_curriculum_learning
         self.delta = delta
-        self.sample = sample
-        self.granu = granu
-        self.temp = temp
         self.scaler = scaler
         
         # encoder
@@ -168,41 +159,16 @@ class IndexDGCRN(nn.Module):
         diff = (x - x_his).abs()
         pseudo_labels = (diff <= self.delta).squeeze(-1)  # (B, T, N) True means normal speed
         return pseudo_labels.sum(1) > 0  # regard T as whole
-    
-    def get_memory_labels(self, x, x_his):
-        x = x.reshape(-1, self.sample, self.horizon, self.num_nodes, self.input_dim)  # (B*K, T, N, 1) -> (B, K, T, N, 1)
-        diff = (x - x_his.unsqueeze(1)).abs()
-        pseudo_labels = (diff <= self.delta).reshape(-1, self.horizon, self.num_nodes)  # (B*K, T, N) True means normal speed
-        return pseudo_labels.sum(1) > 0  # regard T as whole
-    
-    def sample_history_memory(self, x_cov, memory):
-        samples = []
-        initial_times = x_cov[:, 0, 0, 0] * GRANULARITY[self.granu]  # (B, )
-        for t in initial_times:
-            sample_num = len(memory[int(t)]) 
-            if self.sample >= sample_num:
-                idxs = np.random.randint(0, sample_num, size=self.sample - sample_num)  # 有重复
-                sample_t = memory[int(t)] + [memory[int(t)][id] for id in idxs]
-            else:
-                idxs = np.random.choice(sample_num, size=self.sample, replace=False)  # 无重复
-                sample_t = torch.from_numpy(np.array([memory[int(t)][id] for id in idxs])).to(x_cov.device)
-            samples.append(sample_t)  # (self.sample, T, N, 1)
-        return torch.stack(samples, dim=0).reshape(-1, self.horizon, self.num_nodes, self.input_dim)  # (B * self.sample, T, N, 1)
          
-    def memory_contrastive_loss(self, x_cov, h_t, h_t_memory, labels, memory_labels, support):
-        h_t_memory = h_t_memory.reshape(-1, self.sample, self.num_nodes, self.rnn_units).transpose(1, 2)  # (B, K, N, D)->(B, N, K, D)
-        memory_labels = memory_labels.reshape(-1, self.sample, self.num_nodes)  # (B, K, N)
-        flags = labels.unsqueeze(1) ^ memory_labels  # (B, K, N)  False: same label
-        # print('neg: ', flags.sum(), 'pos: ', (~flags).sum())
-        sim_matrix = torch.exp(F.cosine_similarity(h_t.unsqueeze(2), h_t_memory, dim=-1).transpose(1, 2) / self.temp)  # (B, K, N)
-        pos_score = (sim_matrix * ~flags).sum(1)   # x: (B, N, 1, D) x_his: (B, N, K, D)
-        neg_score = (sim_matrix * flags).sum(1)   # x: (B, N, D) x_his: (B, N, D)
+    def supervised_contrastive_loss(self, h_t, h_t_his, labels):
+        sim_matrix = (1 + F.cosine_similarity(h_t, h_t_his, dim=-1)) / 2  # (B, N) normalize [0, 1]
+        pos_score = (sim_matrix * labels)  # (B, N)
+        neg_score = (sim_matrix * ~labels) 
         ratio = (pos_score + 1e-12) / (pos_score + neg_score)
         contra_loss = torch.mean(-torch.log(ratio))
-        # print(contra_loss)
-        return contra_loss, sim_matrix
+        return contra_loss
     
-    def forward(self, x, y_cov, labels=None, x_cov=None, x_his=None, y_his=None, batches_seen=None, memory=None):
+    def forward(self, x, y_cov, labels=None, x_cov=None, x_his=None, y_his=None, batches_seen=None):
         support = F.softmax(F.relu(torch.mm(self.node_embeddings, self.node_embeddings.transpose(0, 1))), dim=1)
         supports_en = [support]
         init_state = self.encoder.init_hidden(x.shape[0])
@@ -210,18 +176,13 @@ class IndexDGCRN(nn.Module):
         h_t = h_en[:, -1, :, :] # B, N, hidden (last state)        
         
         #* supervised contrastive learning 
-        history_sample = self.sample_history_memory(x_cov, memory)  # (B*K, T, N, 1)
-        pseudo_labels = self.get_pseudo_labels(x, x_his)  # (B, N)
-        memory_labels = self.get_memory_labels(history_sample, x_his)  # (B*K, N)
-        init_state = self.encoder.init_hidden(history_sample.shape[0])
-        h_en_memory, state_en_memory = self.encoder(history_sample, init_state, supports_en) # B, T, N, hidden
-        h_t_memory = h_en_memory[:, -1, :, :] # B*K, N, hidden (last state) 
         contra_loss = None
-        if x_his is not None:
-            # sample history memory
-            contra_loss, score_matirx = self.memory_contrastive_loss(x_cov, h_t, h_t_memory, pseudo_labels, memory_labels, support)
-        # fusion
-        h_t = h_t + torch.sum(torch.softmax(score_matirx, dim=1).unsqueeze(-1) * h_t_memory.reshape(-1, self.sample, self.num_nodes, self.rnn_units), dim=1) 
+        if labels is not None and x_his is not None:
+            pseudo_labels = self.get_pseudo_labels(x, x_his)  # (B, N)
+            init_state = self.encoder.init_hidden(x_his.shape[0])
+            h_en_his, state_en_his = self.encoder(self.scaler.transform(x_his), init_state, supports_en) # B, T, N, hidden
+            h_t_his = h_en_his[:, -1, :, :] # B, N, hidden (last state) 
+            contra_loss = self.supervised_contrastive_loss(h_t, h_t_his, pseudo_labels) 
         
         node_embeddings = self.hypernet(h_t) # B, N, d
         support = F.softmax(F.relu(torch.einsum('bnc,bmc->bnm', node_embeddings, node_embeddings)), dim=-1) 
@@ -267,7 +228,7 @@ def main():
     parser.add_argument('--rnn_units', type=int, default=64, help='number of hidden units')
     args = parser.parse_args()
     device = torch.device("cuda:{}".format(args.gpu)) if torch.cuda.is_available() else torch.device("cpu")
-    model = IndexDGCRN(num_nodes=args.num_variable, input_dim=args.channelin, output_dim=args.channelout, horizon=args.seq_len, rnn_units=args.rnn_units).to(device)
+    model = HisDGCRN(num_nodes=args.num_variable, input_dim=args.channelin, output_dim=args.channelout, horizon=args.seq_len, rnn_units=args.rnn_units).to(device)
     summary(model, [(args.his_len, args.num_variable, args.channelin), (args.seq_len, args.num_variable, args.channelout)], device=device)
     print_params(model)
     
