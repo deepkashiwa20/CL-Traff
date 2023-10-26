@@ -202,8 +202,8 @@ class StgclDGCRN(nn.Module):
         times = input_[:, 0, 0, 0]
         m = []
         cnt = 0
-        # c = thres / 288
-        c = thres / 2016
+        c = thres / 288
+        # c = thres / 2016
         for t in times:
             if t < c:
                 st = times < 0
@@ -222,7 +222,7 @@ class StgclDGCRN(nn.Module):
         m = torch.cat(m)
         return m
     
-    def get_unsupervised_loss(self, inputs, rep, rep_aug, support):
+    def get_unsupervised_loss(self, inputs, rep, rep_aug, supports_en):
         """
             inputs: input (bs, T, node, in_dim) in_dim=1, i.e., time slot
             rep: original representation, (bs, node, dim)
@@ -254,7 +254,7 @@ class StgclDGCRN(nn.Module):
         
         # spatial negative filter
         if self.fn_t:
-            _, indices = torch.topk(support, k=self.top_k+1, dim=-1)  # (node, k)
+            _, indices = torch.topk(supports_en[0], k=self.top_k+1, dim=-1)  # (node, k)
             adj = torch.ones((self.num_nodes, self.num_nodes), dtype=torch.bool).to(self.device)
             adj[torch.arange(adj.size(0)).unsqueeze(1), indices] = False
             adj = adj + diag
@@ -333,7 +333,7 @@ class StgclDGCRN(nn.Module):
         
         # TODO self-supervised contrastive learning
         if labels is not None and self.schema in [1, 2, 3, 4, 5]:
-            u_loss = self.get_unsupervised_loss(x_cov, h_t, h_t_aug, support)
+            u_loss = self.get_unsupervised_loss(x_cov, h_t, h_t_aug, supports_en)
             return output, u_loss
         return output, None
 

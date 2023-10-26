@@ -42,9 +42,6 @@ def prepare_x_y(x, y):
     x0 = x[..., :args.input_dim]
     y0 = y[..., :args.output_dim]
     y1 = y[..., args.output_dim:-1]
-    # x0 = torch.from_numpy(x0).float()
-    # y0 = torch.from_numpy(y0).float()
-    # y1 = torch.from_numpy(y1).float()
     return x0.to(device), y0.to(device), y1.to(device) # x, y, y_cov
     
 def evaluate(model, mode):
@@ -56,7 +53,7 @@ def evaluate(model, mode):
             x, y, ycov = prepare_x_y(x, y)
             output, h_att, query, pos, neg = model(x, ycov)
             y_pred = scaler.inverse_transform(output)
-            y_true = scaler.inverse_transform(y)
+            y_true = y
             loss1 = masked_mae_loss(y_pred, y_true) # masked_mae_loss(y_pred, y_true)
             separate_loss = nn.TripletMarginLoss(margin=1.0)
             compact_loss = nn.MSELoss()
@@ -110,7 +107,7 @@ def traintest_model():
             x, y, ycov = prepare_x_y(x, y)
             output, h_att, query, pos, neg = model(x, ycov, y, batches_seen)
             y_pred = scaler.inverse_transform(output)
-            y_true = scaler.inverse_transform(y)
+            y_true = y
             loss1 = masked_mae_loss(y_pred, y_true)
             separate_loss = nn.TripletMarginLoss(margin=1.0)
             compact_loss = nn.MSELoss()
@@ -265,7 +262,7 @@ if torch.cuda.is_available(): torch.cuda.manual_seed(args.seed)
 
 data = {}
 for category in ['train', 'val', 'test']:
-    cat_data = np.load(os.path.join(f'../{args.dataset}', category + '.npz'))
+    cat_data = np.load(os.path.join(f'../{args.dataset}', category + 'plus.npz'))
     data['x_' + category] = cat_data['x']
     data['y_' + category] = cat_data['y']
 scaler = StandardScaler(mean=data['x_train'][..., 0].mean(), std=data['x_train'][..., 0].std())

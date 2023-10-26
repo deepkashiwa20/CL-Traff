@@ -43,9 +43,6 @@ def prepare_x_y(x, y):
     x0 = x[..., :args.input_dim]
     y0 = y[..., :args.output_dim]
     y1 = y[..., args.output_dim:-1]  #* input_dim = 3 rather than 2 due to addition of history average
-    # x0 = torch.from_numpy(x0).float()
-    # y0 = torch.from_numpy(y0).float()
-    # y1 = torch.from_numpy(y1).float()
     return x0.to(device), y0.to(device), y1.to(device) # x, y, y_cov
 
 def prepare_x_y_with_his(x, y):
@@ -55,12 +52,6 @@ def prepare_x_y_with_his(x, y):
     y0 = y[..., 0:1] # y
     y1 = y[..., 1:2] # y_cov
     y2 = y[..., 2:3] # y_his
-    # x0 = torch.from_numpy(x0).float()
-    # x1 = torch.from_numpy(x1).float()
-    # x2 = torch.from_numpy(x2).float()
-    # y0 = torch.from_numpy(y0).float()
-    # y1 = torch.from_numpy(y1).float()
-    # y2 = torch.from_numpy(y2).float()
     return x0.to(device), x1.to(device), x2.to(device), y0.to(device), y1.to(device), y2.to(device)  # x, x_cov, x_his, y, y_cov, y_his
 
 def evaluate(model, mode):
@@ -76,7 +67,7 @@ def evaluate(model, mode):
                 x, x_cov, x_his, y, y_cov, y_his = prepare_x_y_with_his(x, y)
             output, _ = model(x, y_cov, x_cov=x_cov, x_his=x_his, y_his=y_his, memory=data['history_memory'])
             y_pred = scaler.inverse_transform(output)
-            y_true = scaler.inverse_transform(y)
+            y_true = y
             ys_true.append(y_true)
             ys_pred.append(y_pred)
         y_size = data[f'y_{mode}'].shape[0]
@@ -129,7 +120,7 @@ def traintest_model():
                 x, x_cov, x_his, y, y_cov, y_his = prepare_x_y_with_his(x, y)
             output, contra_loss = model(x, y_cov, y, x_cov=x_cov, x_his=x_his, y_his=y_his, batches_seen=batches_seen, memory=data['history_memory'])
             y_pred = scaler.inverse_transform(output)
-            y_true = scaler.inverse_transform(y)
+            y_true = y
             loss = masked_mae_loss(y_pred, y_true) # masked_mae_loss(y_pred, y_true)
             if args.sup_contra:
                 mae_losses.append(loss.item())
@@ -203,7 +194,7 @@ parser.add_argument('--seed', type=int, default=100, help='random seed.')
 parser.add_argument("--sup_contra", type=eval, choices=[True, False], default='True', help="whether to use supervised contrastive learning or baseline")
 parser.add_argument('--delta', type=float, default=10.0, help='abnormal threshold')
 parser.add_argument("--use_HA", type=eval, choices=[True, False], default='True', help="whether to use history average in X")
-parser.add_argument('--granu', type=str, choices=['week', 'day', 'hour'], default='week', help='which granularity to sample history data')
+parser.add_argument('--granu', type=str, choices=['week', 'day', 'hour'], default='day', help='which granularity to sample history data')
 parser.add_argument('--sample', type=int, default=1, help='the number of sampled history memory.')
 parser.add_argument('--lamb', type=float, default=1., help='lamb value for supervised contrastive loss')  # 0.01
 parser.add_argument('--temp', type=float, default=1., help='temperature parameter')
@@ -293,13 +284,12 @@ if torch.cuda.is_available(): torch.cuda.manual_seed(args.seed)
 
 data = {}
 for category in ['train', 'val', 'test']:
-    cat_data = np.load(os.path.join(f'../{args.dataset}', category + '.npz'))
+    cat_data = np.load(os.path.join(f'../{args.dataset}', category + 'plus.npz'))
     data['x_' + category] = cat_data['x']
     data['y_' + category] = cat_data['y']
 scaler = StandardScaler(mean=data['x_train'][..., 0].mean(), std=data['x_train'][..., 0].std())
 for category in ['train', 'val', 'test']:
     data['x_' + category][..., 0] = scaler.transform(data['x_' + category][..., 0])
-    data['y_' + category][..., 0] = scaler.transform(data['y_' + category][..., 0])
 
 data['train_loader'] = torch.utils.data.DataLoader(
     torch.utils.data.TensorDataset(torch.FloatTensor(data['x_train']), torch.FloatTensor(data['y_train'])),
