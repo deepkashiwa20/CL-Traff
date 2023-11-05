@@ -179,7 +179,7 @@ class StgclDGCRN(nn.Module):
                     nn.ReLU(),
                     nn.Linear(self.decoder_dim, self.decoder_dim),
                 )
-        #* schema 3: two different encoders but with fused representations for decoder (fusion is worse)
+        #* schema 3: two different encoders but with fused representations for decoder
         if self.schema == 3:
             if self.fusion_num == 1:
                 self.fusion_layer = nn.Sequential(
@@ -235,7 +235,7 @@ class StgclDGCRN(nn.Module):
         tempo_norm = tempo_rep.norm(dim=2).unsqueeze(dim=2)
         tempo_norm_aug = tempo_rep_aug.norm(dim=2).unsqueeze(dim=2)
         tempo_matrix = torch.matmul(tempo_rep, tempo_rep_aug.transpose(1,2)) / torch.matmul(tempo_norm, tempo_norm_aug.transpose(1,2))
-        tempo_matrix = torch.exp(tempo_matrix / self.temp)
+        tempo_matrix = torch.exp(tempo_matrix / self.temp)  # (node, bs, bs)
 
         # temporal negative filter
         if self.fn_t:
@@ -265,7 +265,7 @@ class StgclDGCRN(nn.Module):
             ratio = pos_sum / (spatial_neg + tempo_neg.transpose(0,1) - pos_sum)
         else:
             ratio = pos_sum / (spatial_neg + tempo_neg.transpose(0,1))
-        # ratio = pos_sum / tempo_neg.transpose(0,1)  #* no spatial_neg is not better than with spatial_neg
+        # ratio = pos_sum / tempo_neg.transpose(0,1)
         u_loss = torch.mean(-torch.log(ratio))
         return u_loss    
     
@@ -282,12 +282,18 @@ class StgclDGCRN(nn.Module):
         h_t = h_en[:, -1, :, :]   # B, N, hidden (last state)        
         ht_list = [h_t]*self.num_layers
         
+        node_embeddings = self.hypernet(h_t) # B, N, d
+        h_t = node_embeddings
+        
         # TODO: support different augmentation schemas
         #* two encoders
         if self.schema in [1, 3]:
             init_state_aug = self.encoder_aug.init_hidden(x.shape[0])
             h_en_aug, state_en_aug = self.encoder_aug(x, init_state_aug, supports_en) # B, T, N, hidden      
             h_t_aug = h_en_aug[:, -1, :, :]   # B, N, hidden (last state)
+            ht_list_aug = [h_t_aug]*self.num_layers
+            node_embeddings_aug = self.hypernet(h_t_aug) # B, N, d
+            h_t_aug = node_embeddings_aug
         
         #* one encoder with extra two mlp encoders
         if labels is not None and self.schema == 2:
@@ -296,7 +302,7 @@ class StgclDGCRN(nn.Module):
         
         #* fusion for decoder
         if self.schema == 3:  
-            ht_list_aug = [h_t_aug]*self.num_layers
+            # ht_list_aug = [h_t_aug]*self.num_layers
             ht_list = [self.fusion_layer(torch.cat(ht_list + ht_list_aug, dim=-1))]*self.num_layers
         
         #* one encoder with input data augmentation
@@ -308,14 +314,17 @@ class StgclDGCRN(nn.Module):
             init_state_aug = self.encoder.init_hidden(x_.shape[0])
             h_en_aug, state_en_aug = self.encoder(x_, init_state_aug, supports_en) # B, T, N, hidden      
             h_t_aug = h_en_aug[:, -1, :, :]   # B, N, hidden (last state) 
+            node_embeddings_aug = self.hypernet(h_t_aug) # B, N, d
+            h_t_aug = node_embeddings_aug
         
         if labels is not None and self.schema == 5:
             init_state_aug = self.encoder.init_hidden(x.shape[0])
             h_en_aug, _ = self.encoder(x_his, init_state_aug, supports_en) # B, T, N, hidden the same encoder
             h_t_aug = h_en_aug[:, -1, :, :]   # B, N, hidden (last state)
-            # [todo] self.delta is used to discriminate normal and abnormal 
+            node_embeddings_aug = self.hypernet(h_t_aug) # B, N, d
+            h_t_aug = node_embeddings_aug
             
-        node_embeddings = self.hypernet(h_t) # B, N, d
+        # node_embeddings = self.hypernet(h_t) # B, N, d
         support = F.softmax(F.relu(torch.einsum('bnc,bmc->bnm', node_embeddings, node_embeddings)), dim=-1) 
         supports_de = [support]
         
