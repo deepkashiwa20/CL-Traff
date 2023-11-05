@@ -160,24 +160,24 @@ class StgclDGCRN(nn.Module):
         #* schema 2: only one encoder but with two different MLP encoders
         if self.schema == 2: 
             self.fc_aug1_mean = nn.Sequential(
-                    nn.Linear(self.decoder_dim, self.decoder_dim),
+                    nn.Linear(self.embed_dim, self.embed_dim),
                     nn.ReLU(),
-                    nn.Linear(self.decoder_dim, self.decoder_dim),
+                    nn.Linear(self.embed_dim, self.embed_dim),
                 )
             self.fc_aug1_var = nn.Sequential(
-                    nn.Linear(self.decoder_dim, self.decoder_dim),
+                    nn.Linear(self.embed_dim, self.embed_dim),
                     nn.ReLU(),
-                    nn.Linear(self.decoder_dim, self.decoder_dim),
+                    nn.Linear(self.embed_dim, self.embed_dim),
                 )
             self.fc_aug2_mean = nn.Sequential(
-                    nn.Linear(self.decoder_dim, self.decoder_dim),
+                    nn.Linear(self.embed_dim, self.embed_dim),
                     nn.ReLU(),
-                    nn.Linear(self.decoder_dim, self.decoder_dim),
+                    nn.Linear(self.embed_dim, self.embed_dim),
                 )
             self.fc_aug2_var = nn.Sequential(
-                    nn.Linear(self.decoder_dim, self.decoder_dim),
+                    nn.Linear(self.embed_dim, self.embed_dim),
                     nn.ReLU(),
-                    nn.Linear(self.decoder_dim, self.decoder_dim),
+                    nn.Linear(self.embed_dim, self.embed_dim),
                 )
         #* schema 3: two different encoders but with fused representations for decoder
         if self.schema == 3:
