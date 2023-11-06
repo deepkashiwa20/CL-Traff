@@ -151,7 +151,7 @@ class StgclDGCRN(nn.Module):
         # encoder
         self.encoder = AGCRNN_Encoder(self.num_nodes, self.input_dim, self.rnn_units, self.cheb_k, self.num_layers)
         self.hypernet = nn.Sequential(nn.Linear(self.rnn_units, self.embed_dim, bias=True))
-        # self.hypernet_aug = nn.Sequential(nn.Linear(self.rnn_units, self.embed_dim, bias=True))
+        self.hypernet_aug = nn.Sequential(nn.Linear(self.rnn_units, self.embed_dim, bias=True))
         
         # TODO: support different augmentation schemas
         #* schema 1: two different encoders
@@ -293,8 +293,7 @@ class StgclDGCRN(nn.Module):
             h_en_aug, state_en_aug = self.encoder_aug(x, init_state_aug, supports_en) # B, T, N, hidden      
             h_t_aug = h_en_aug[:, -1, :, :]   # B, N, hidden (last state)
             ht_list_aug = [h_t_aug]*self.num_layers
-            node_embeddings_aug = self.hypernet(h_t_aug) # B, N, d
-            # node_embeddings_aug = self.hypernet_aug(h_t_aug) # B, N, d
+            node_embeddings_aug = self.hypernet_aug(h_t_aug) # B, N, d
             h_t_aug = node_embeddings_aug
         
         #* one encoder with extra two mlp encoders
