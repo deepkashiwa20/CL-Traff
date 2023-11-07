@@ -1,6 +1,9 @@
 *.npz
 *.pt
 *.npy
+raw_data
+raw_data.zip
+PEMS0*
 METRLA/metr-la-plus.h5
 visualizations/results
 model/GCRN_old.py
