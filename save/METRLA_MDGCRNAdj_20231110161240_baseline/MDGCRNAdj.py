@@ -5,7 +5,7 @@ import math
 import numpy as np
 
 class AGCN(nn.Module):
-    def __init__(self, dim_in, dim_out, cheb_k): # this can be extended to (self, dim_in, dim_out, cheb_k, num_support)
+    def __init__(self, dim_in, dim_out, cheb_k):
         super(AGCN, self).__init__()
         self.cheb_k = cheb_k
         self.weights = nn.Parameter(torch.FloatTensor(cheb_k*dim_in, dim_out)) # num_support*cheb_k*dim_in is the length of support
@@ -28,7 +28,7 @@ class AGCN(nn.Module):
                     support_ks.append(torch.matmul(2 * support, support_ks[-1]) - support_ks[-2]) 
                 for graph in support_ks:
                     x_g.append(torch.einsum("bnm,bmc->bnc", graph, x))
-        x_g = torch.cat(x_g, dim=-1)
+        x_g = torch.cat(x_g, dim=-1) # B, N, 2 * cheb_k * dim_in
         x_gconv = torch.einsum('bni,io->bno', x_g, self.weights) + self.bias  # b, N, dim_out
         return x_gconv
     
@@ -118,11 +118,11 @@ class ADCRNN_Decoder(nn.Module):
         return current_inputs, output_hidden
 
 
-class DGCRN(nn.Module):
+class MDGCRNAdj(nn.Module):
     def __init__(self, num_nodes, input_dim, output_dim, horizon, rnn_units, rnn_layers=1, cheb_k=3,
-                 ycov_dim=1, embed_dim=10, adj_mx=None, cl_decay_steps=2000, use_curriculum_learning=True,
-                 fn_t=12, temp=0.1, top_k=10, schema=1, contra_denominator=True, device="cpu"):
-        super(DGCRN, self).__init__()
+                 ycov_dim=1, mem_num=20, mem_dim=64, embed_dim=10, adj_mx=None, cl_decay_steps=2000, 
+                 use_curriculum_learning=True, contra_type=True, device="cpu"):
+        super(MDGCRNAdj, self).__init__()
         self.num_nodes = num_nodes
         self.input_dim = input_dim
         self.rnn_units = rnn_units
@@ -135,18 +135,19 @@ class DGCRN(nn.Module):
         self.cl_decay_steps = cl_decay_steps
         self.use_curriculum_learning = use_curriculum_learning
         # TODO: support contrastive learning
-        self.fn_t = fn_t
-        self.temp = temp
-        self.top_k = top_k
+        self.contra_type = contra_type
         self.device = device
-        self.schema = schema
-        self.contra_denominator = contra_denominator
+        
+        # memory
+        self.mem_num = mem_num
+        self.mem_dim = mem_dim
+        self.memory = self.construct_memory()
         
         # encoder
         self.encoder = ADCRNN_Encoder(self.num_nodes, self.input_dim, self.rnn_units, self.cheb_k, self.rnn_layers)
         
         # deocoder
-        self.decoder_dim = self.rnn_units
+        self.decoder_dim = self.rnn_units + self.mem_dim
         self.decoder = ADCRNN_Decoder(self.num_nodes, self.output_dim + self.ycov_dim, self.decoder_dim, self.cheb_k, self.rnn_layers)
 
         # output
@@ -154,79 +155,34 @@ class DGCRN(nn.Module):
         
         # graph
         self.adj_mx = adj_mx
-        self.hypernet = nn.Sequential(nn.Linear(self.rnn_units, self.embed_dim, bias=True))
+        self.hypernet = nn.Sequential(nn.Linear(self.rnn_units + self.mem_dim, self.embed_dim, bias=True))
         
     def compute_sampling_threshold(self, batches_seen):
         return self.cl_decay_steps / (self.cl_decay_steps + np.exp(batches_seen / self.cl_decay_steps))
+
+    def construct_memory(self):
+        memory_dict = nn.ParameterDict()
+        memory_dict['Memory'] = nn.Parameter(torch.randn(self.mem_num, self.mem_dim), requires_grad=True)     # (M, d)
+        memory_dict['Wq'] = nn.Parameter(torch.randn(self.rnn_units, self.mem_dim), requires_grad=True)    # project to query
+        for param in memory_dict.values():
+            nn.init.xavier_normal_(param)
+        return memory_dict
     
-    def filter_negative(self, input_, thres):
-        times = input_[:, 0, 0, 0]
-        m = []
-        cnt = 0
-        c = thres / 288
-        # c = thres / 2016
-        for t in times:
-            if t < c:
-                st = times < 0
-                gt = torch.logical_and(times <= (1 + t - c), times >= (t + c))
-            elif t > (1 - c):
-                st = torch.logical_and(times <= (t - c), times >= (c + t - 1))
-                gt = times > 1
-            else:
-                st = times <= (t - c)
-                gt = times >= (t + c)
-            
-            res = torch.logical_or(st, gt).view(1, -1)
-            # res[0, cnt] = True
-            # cnt += 1
-            m.append(res)
-        m = torch.cat(m)
-        return m
-    
-    def get_unsupervised_loss(self, inputs, rep, rep_aug, supports_en):
-        """
-            inputs: input (bs, T, node, in_dim) in_dim=1, i.e., time slot
-            rep: original representation, (bs, node, dim)
-            rep_aug: its augmented representation, (bs, node, dim)
-            return: u_loss, i.e., unsupervised contrastive loss
-        """
-        # temporal contrast
-        tempo_rep = rep.transpose(0,1) # (node, bs, dim)
-        tempo_rep_aug = rep_aug.transpose(0,1)
-        tempo_norm = tempo_rep.norm(dim=2).unsqueeze(dim=2)
-        tempo_norm_aug = tempo_rep_aug.norm(dim=2).unsqueeze(dim=2)
-        tempo_matrix = torch.matmul(tempo_rep, tempo_rep_aug.transpose(1,2)) / torch.matmul(tempo_norm, tempo_norm_aug.transpose(1,2))
-        tempo_matrix = torch.exp(tempo_matrix / self.temp)  # (node, bs, bs)
-
-        # temporal negative filter
-        if self.fn_t:
-            m = self.filter_negative(inputs, self.fn_t)
-            tempo_matrix = tempo_matrix * m
-        tempo_neg = torch.sum(tempo_matrix, dim=2) # (node, bs)
-
-        # spatial contrast
-        spatial_norm = rep.norm(dim=2).unsqueeze(dim=2)
-        spatial_norm_aug = rep_aug.norm(dim=2).unsqueeze(dim=2)
-        spatial_matrix = torch.matmul(rep, rep_aug.transpose(1,2)) / torch.matmul(spatial_norm, spatial_norm_aug.transpose(1,2))
-        spatial_matrix = torch.exp(spatial_matrix / self.temp)  # (bs, node, node)
-        
-        diag = torch.eye(self.num_nodes, dtype=torch.bool).to(self.device)
-        pos_sum = torch.sum(spatial_matrix * diag, dim=2) # (bs, node)
-        
-        # spatial negative filter
-        if self.fn_t:
-            adj = (supports_en[0] == 0).to(self.device)  # True means distant nodes
-            adj = adj + diag
-            spatial_matrix = spatial_matrix * adj
-        spatial_neg = torch.sum(spatial_matrix, dim=2) # (bs, node)
-
-        if not self.contra_denominator:
-            ratio = pos_sum / (spatial_neg + tempo_neg.transpose(0,1) - pos_sum)
-        else:
-            ratio = pos_sum / (spatial_neg + tempo_neg.transpose(0,1))
-        # ratio = pos_sum / tempo_neg.transpose(0,1)
-        u_loss = torch.mean(-torch.log(ratio))
-        return u_loss
+    def query_memory(self, h_t:torch.Tensor):
+        query = torch.matmul(h_t, self.memory['Wq'])     # (B, N, d)
+        att_score = torch.softmax(torch.matmul(query, self.memory['Memory'].t()), dim=-1)         # alpha: (B, N, M)
+        value = torch.matmul(att_score, self.memory['Memory'])     # (B, N, d)
+        _, ind = torch.topk(att_score, k=2, dim=-1)
+        pos = self.memory['Memory'][ind[:, :, 0]] # B, N, d
+        if self.contra_type:  # InfoNCE loss
+            neg = self.memory['Memory'].repeat(query.shape[0], self.num_nodes, 1, 1)  # (B, N, M, d)
+            mask_index = ind[:, :, [0]]  # B, N, 1
+            mask = torch.zeros_like(att_score, dtype=torch.bool).to(att_score.device)  # B, N, M
+            mask = mask.scatter(-1, mask_index, True)  
+        else:  # Triplet loss
+            neg = self.memory['Memory'][ind[:, :, 1]] # B, N, d
+            mask = None
+        return value, query, pos, neg, mask
             
     def forward(self, x, x_cov, y_cov, labels=None, batches_seen=None):
         supports_en = self.adj_mx
@@ -234,11 +190,14 @@ class DGCRN(nn.Module):
         h_en, state_en = self.encoder(x, init_state, supports_en) # B, T, N, hidden
         h_t = h_en[:, -1, :, :] # B, N, hidden (last state)        
         
-        node_embeddings = self.hypernet(h_t) # B, N, d
+        h_att, query, pos, neg, mask = self.query_memory(h_t)
+        h_aug = torch.cat([h_t, h_att], dim=-1) # B, N, 2d
+        
+        node_embeddings = self.hypernet(h_aug) # B, N, e
         support = F.softmax(F.relu(torch.einsum('bnc,bmc->bnm', node_embeddings, node_embeddings)), dim=-1) 
         supports_de = [support]
         
-        ht_list = [h_t]*self.rnn_layers
+        ht_list = [h_aug]*self.rnn_layers
         go = torch.zeros((x.shape[0], self.num_nodes, self.output_dim), device=x.device)
         out = []
         for t in range(self.horizon):
@@ -251,11 +210,7 @@ class DGCRN(nn.Module):
                     go = labels[:, t, ...]
         output = torch.stack(out, dim=1)
         
-        # TODO self-supervised contrastive learning
-        if labels is not None and self.schema in [1]:
-            u_loss = self.get_unsupervised_loss(x_cov, h_t, h_t, supports_en)
-            return output, u_loss
-        return output, None
+        return output, h_att, query, pos, neg, mask
 
 def print_params(model):
     # print trainable params
@@ -265,7 +220,7 @@ def print_params(model):
         if param.requires_grad:
             print(name, param.shape, param.numel())
             param_count += param.numel()
-    print(f'In total: {param_count} trainable parameters. \n')
+    print(f'In total: {param_count} trainable parameters.')
     return
 
 def main():
@@ -282,7 +237,7 @@ def main():
     parser.add_argument('--rnn_units', type=int, default=64, help='number of hidden units')
     args = parser.parse_args()
     device = torch.device("cuda:{}".format(args.gpu)) if torch.cuda.is_available() else torch.device("cpu")
-    model = DGCRN(num_nodes=args.num_variable, input_dim=args.channelin, output_dim=args.channelout, horizon=args.seq_len, rnn_units=args.rnn_units).to(device)
+    model = MemDGCRN(num_nodes=args.num_variable, input_dim=args.channelin, output_dim=args.channelout, horizon=args.seq_len, rnn_units=args.rnn_units).to(device)
     summary(model, [(args.his_len, args.num_variable, args.channelin), (args.seq_len, args.num_variable, args.channelout)], device=device)
     print_params(model)
     

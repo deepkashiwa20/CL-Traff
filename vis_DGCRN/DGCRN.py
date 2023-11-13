@@ -240,27 +240,8 @@ class DGCRN(nn.Module):
         ht_list = [h_t]*self.num_layers
         
         node_embeddings = self.hypernet(h_t) # B, N, d
-        support = F.softmax(F.relu(torch.einsum('bnc,bmc->bnm', node_embeddings, node_embeddings)), dim=-1) 
-        supports_de = [support]
+        return node_embeddings
         
-        go = torch.zeros((x.shape[0], self.num_nodes, self.output_dim), device=x.device)
-        out = []
-        for t in range(self.horizon):
-            h_de, ht_list = self.decoder(torch.cat([go, y_cov[:, t, ...]], dim=-1), ht_list, supports_de)
-            go = self.proj(h_de)
-            out.append(go)
-            if self.training and self.use_curriculum_learning:
-                c = np.random.uniform(0, 1)
-                if c < self.compute_sampling_threshold(batches_seen):
-                    go = labels[:, t, ...]
-        output = torch.stack(out, dim=1)
-        
-        # TODO self-supervised contrastive learning
-        if labels is not None and self.schema in [1]:
-            u_loss = self.get_unsupervised_loss(x_cov, h_t, h_t, supports_en)
-            return output, u_loss
-        return output, None
-
 def print_params(model):
     # print trainable params
     param_count = 0

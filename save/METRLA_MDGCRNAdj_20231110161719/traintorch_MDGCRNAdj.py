@@ -12,7 +12,33 @@ from torchinfo import summary
 import argparse
 import logging
 from utils import StandardScaler, masked_mae_loss, masked_mape_loss, masked_mse_loss, masked_rmse_loss
-from DGCRN import DGCRN
+from utils import load_adj
+from MDGCRNAdj import MDGCRNAdj
+
+class ContrastiveLoss():
+    def __init__(self, infonce=True, mask=None, temp=0.1, margin=1.0):
+        self.infonce = infonce
+        self.mask = mask
+        self.temp = temp
+        self.margin = margin
+    
+    def calculate(self, query, pos, neg, mask):
+        """
+        :param query: shape (batch_size, num_sensor, hidden_dim)
+        :param pos: shape (batch_size, num_sensor, hidden_dim)
+        :param neg: shape (batch_size, num_sensor, hidden_dim) or (batch_size, num_sensor, num_memory, hidden_dim)
+        :param mask: shape (batch_size, num_sensor, num_memory) True means positives
+        """
+        if not self.infonce:
+            separate_loss = nn.TripletMarginLoss(margin=self.margin)
+            return separate_loss(query, pos.detach(), neg.detach())
+        else:
+            score_matrix = F.cosine_similarity(query.unsqueeze(-2), neg, dim=-1)  # (B, N, M)
+            score_matrix = torch.exp(score_matrix / self.temp)
+            pos_sum = torch.sum(score_matrix * mask, dim=-1)
+            ratio = pos_sum / torch.sum(score_matrix, dim=-1)
+            u_loss = torch.mean(-torch.log(ratio))
+            return u_loss  
 
 def print_model(model):
     param_count = 0
@@ -24,11 +50,13 @@ def print_model(model):
     logger.info(f'In total: {param_count} trainable parameters.')
     return
 
-def get_model():  
-    model = DGCRN(num_nodes=args.num_nodes, input_dim=args.input_dim, output_dim=args.output_dim, horizon=args.horizon, 
-                 rnn_units=args.rnn_units, rnn_layers=args.rnn_layers, embed_dim=args.embed_dim, cheb_k = args.max_diffusion_step, 
-                 cl_decay_steps=args.cl_decay_steps, use_curriculum_learning=args.use_curriculum_learning, fn_t=args.fn_t, 
-                 temp=args.temp, top_k=args.top_k, schema=args.schema, contra_denominator=args.contra_denominator, device=device).to(device)
+def get_model():
+    adj_mx = load_adj(adj_mx_path, args.adj_type)
+    adjs = [torch.tensor(i).to(device) for i in adj_mx]            
+    model = MDGCRNAdj(num_nodes=args.num_nodes, input_dim=args.input_dim, output_dim=args.output_dim, horizon=args.horizon, 
+                 rnn_units=args.rnn_units, rnn_layers=args.rnn_layers, cheb_k = args.max_diffusion_step, embed_dim=args.embed_dim, 
+                 adj_mx = adjs, cl_decay_steps=args.cl_decay_steps, use_curriculum_learning=args.use_curriculum_learning, 
+                 contra_type=args.contra_type, device=device).to(device)
     return model
 
 def prepare_x_y(x, y):
@@ -54,12 +82,13 @@ def evaluate(model, mode):
         losses = []
         for x, y in data_iter:
             x, x_cov, y, y_cov = prepare_x_y(x, y)
-            output, _ = model(x, x_cov, y_cov)
+            output, h_att, query, pos, neg, mask = model(x, x_cov, y_cov)
             y_pred = scaler.inverse_transform(output)
             y_true = y
             ys_true.append(y_true)
             ys_pred.append(y_pred)
             losses.append(masked_mae_loss(y_pred, y_true).item())
+        
         ys_true, ys_pred = torch.cat(ys_true, dim=0), torch.cat(ys_pred, dim=0)
         loss = masked_mae_loss(ys_pred, ys_true)
 
@@ -97,21 +126,27 @@ def traintest_model():
         start_time = time.time()
         model = model.train()
         data_iter = data['train_loader']#.get_iterator()
-        losses, mae_losses, contra_losses = [], [], []
+        losses, mae_losses, contra_losses, compact_losses = [], [], [], []
         for x, y in data_iter:
             optimizer.zero_grad()
             x, x_cov, y, y_cov = prepare_x_y(x, y)
-            output, u_loss = model(x, x_cov, y_cov, scaler.transform(y), batches_seen)
+            output, h_att, query, pos, neg, mask = model(x, x_cov, y_cov, scaler.transform(y), batches_seen)
             y_pred = scaler.inverse_transform(output)
             y_true = y
             mae_loss = masked_mae_loss(y_pred, y_true) # masked_mae_loss(y_pred, y_true)
-            # TODO: add self-supervised contra loss
-            if u_loss is None:
+            if args.schema == 0:
                 u_loss = torch.zeros_like(mae_loss)
-            loss = mae_loss + args.lam * u_loss 
+            else:
+                separate_loss = ContrastiveLoss(infonce=args.contra_type, mask=mask, temp=args.temp)
+                u_loss = separate_loss.calculate(query, pos, neg, mask)
+            compact_loss = nn.MSELoss()
+            loss1 = compact_loss(query, pos.detach())
+            loss = mae_loss + args.lamb * u_loss + args.lamb1 * loss1
             losses.append(loss.item())
             mae_losses.append(mae_loss.item())
             contra_losses.append(u_loss.item())
+            compact_losses.append(loss1.item())
+            losses.append(loss.item())
             batches_seen += 1
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm) # gradient clipping - this does it in place
@@ -119,10 +154,11 @@ def traintest_model():
         train_loss = np.mean(losses)
         train_mae_loss = np.mean(mae_losses) 
         train_contra_loss = np.mean(contra_losses)
+        train_compact_loss = np.mean(compact_losses)
         lr_scheduler.step()
         val_loss, _, _ = evaluate(model, 'val')
         end_time2 = time.time()
-        message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, train_mae_loss: {:.4f}, train_contra_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.1f}s'.format(epoch_num + 1, args.epochs, batches_seen, train_loss, train_mae_loss, train_contra_loss, val_loss, optimizer.param_groups[0]['lr'], (end_time2 - start_time))
+        message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, train_mae_loss: {:.4f}, train_contra_loss: {:.4f}, train_conpact_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.1f}s'.format(epoch_num + 1, args.epochs, batches_seen, train_loss, train_mae_loss, train_contra_loss, train_compact_loss, val_loss, optimizer.param_groups[0]['lr'], (end_time2 - start_time))
         logger.info(message)
         test_loss, _, _ = evaluate(model, 'test')
 
@@ -165,28 +201,30 @@ parser.add_argument("--lr_decay_ratio", type=float, default=0.1, help="lr_decay_
 parser.add_argument("--epsilon", type=float, default=1e-3, help="optimizer epsilon")
 parser.add_argument("--max_grad_norm", type=int, default=5, help="max_grad_norm")
 parser.add_argument("--use_curriculum_learning", type=eval, choices=[True, False], default='True', help="use_curriculum_learning")
+parser.add_argument("--adj_type", type=str, default='symadj', help="scalap, normlap, symadj, transition")
 parser.add_argument("--cl_decay_steps", type=int, default=2000, help="cl_decay_steps")
 parser.add_argument('--gpu', type=int, default=0, help='which gpu to use')
 parser.add_argument('--seed', type=int, default=100, help='random seed.')
 # TODO: support contra learning
 parser.add_argument('--temp', type=float, default=0.1, help='temperature parameter')
-parser.add_argument('--lam', type=float, default=0.1, help='loss lambda') 
-parser.add_argument('--fn_t', type=int, default=12, help='filter negatives threshold, 12 means 1 hour')
-parser.add_argument('--top_k', type=int, default=10, help='graph neighbors threshold, 10 means top 10 nodes')
+parser.add_argument('--lamb', type=float, default=0.1, help='loss lambda') 
+parser.add_argument('--lamb1', type=float, default=0.1, help='compact loss lambda') 
 parser.add_argument('--schema', type=int, default=1, choices=[0, 1], help='which contra backbone schema to use (0 is no contrast, i.e., baseline)')
-parser.add_argument('--contra_denominator', type=eval, choices=[True, False], default='True', help='whether to contain pos_score in the denominator of contra loss')
+parser.add_argument('--contra_type', type=eval, choices=[True, False], default='True', help='whether to contain pos_score in the denominator of contra loss')
 args = parser.parse_args()
         
 if args.dataset == 'METRLA':
     data_path = f'../{args.dataset}/metr-la.h5'
+    adj_mx_path = f'../{args.dataset}/adj_mx.pkl'
     args.num_nodes = 207
 elif args.dataset == 'PEMSBAY':
     data_path = f'../{args.dataset}/pems-bay.h5'
+    adj_mx_path = f'../{args.dataset}/adj_mx_bay.pkl'
     args.num_nodes = 325
 else:
     pass # including more datasets in the future    
 
-model_name = 'DGCRN'
+model_name = 'MDGCRNAdj'
 timestring = time.strftime('%Y%m%d%H%M%S', time.localtime())
 path = f'../save/{args.dataset}_{model_name}_{timestring}' + '_baseline' if args.schema == 0 else f'../save/{args.dataset}_{model_name}_{timestring}'
 logging_path = f'{path}/{model_name}_{timestring}_logging.txt'
@@ -229,6 +267,7 @@ logger.addHandler(console)
 # logger.info('rnn_units', args.rnn_units)
 # logger.info('embed_dim', args.embed_dim)
 # logger.info('max_diffusion_step', args.max_diffusion_step)
+# logger.info('adj_type', args.adj_type)
 # logger.info('loss', args.loss)
 # logger.info('batch_size', args.batch_size)
 # logger.info('epochs', args.epochs)
