@@ -185,7 +185,7 @@ class DGCRN(nn.Module):
         return m
     
     def filter_negative_graph(self, input_, thres):
-        times = input_[:, 0, 0, 0]
+        times = input_[:, 0, 0, 1]
         m = []
         cnt = 0
         c = thres / 288

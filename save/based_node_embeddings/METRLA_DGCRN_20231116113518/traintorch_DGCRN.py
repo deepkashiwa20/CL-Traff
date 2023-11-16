@@ -12,8 +12,7 @@ from torchinfo import summary
 import argparse
 import logging
 from utils import StandardScaler, masked_mae_loss, masked_mape_loss, masked_mse_loss, masked_rmse_loss
-from utils import load_adj
-from DGCRNAdj import DGCRN
+from DGCRN import DGCRN
 
 def print_model(model):
     param_count = 0
@@ -25,13 +24,11 @@ def print_model(model):
     logger.info(f'In total: {param_count} trainable parameters.')
     return
 
-def get_model():
-    adj_mx = load_adj(adj_mx_path, args.adj_type)
-    adjs = [torch.tensor(i).to(device) for i in adj_mx]            
+def get_model():  
     model = DGCRN(num_nodes=args.num_nodes, input_dim=args.input_dim, output_dim=args.output_dim, horizon=args.horizon, 
-                 rnn_units=args.rnn_units, rnn_layers=args.rnn_layers, cheb_k = args.max_diffusion_step, embed_dim=args.embed_dim, 
-                 adj_mx = adjs, cl_decay_steps=args.cl_decay_steps, use_curriculum_learning=args.use_curriculum_learning, fn_t=args.fn_t, 
-                 temp=args.temp, top_k=args.top_k, schema=args.schema, contra_denominator=args.contra_denominator, use_graph=args.graph, device=device).to(device)
+                 rnn_units=args.rnn_units, rnn_layers=args.rnn_layers, embed_dim=args.embed_dim, cheb_k = args.max_diffusion_step, 
+                 cl_decay_steps=args.cl_decay_steps, use_curriculum_learning=args.use_curriculum_learning, fn_t=args.fn_t, 
+                 temp=args.temp, top_k=args.top_k, schema=args.schema, contra_denominator=args.contra_denominator, device=device).to(device)
     return model
 
 def prepare_x_y(x, y):
@@ -168,7 +165,6 @@ parser.add_argument("--lr_decay_ratio", type=float, default=0.1, help="lr_decay_
 parser.add_argument("--epsilon", type=float, default=1e-3, help="optimizer epsilon")
 parser.add_argument("--max_grad_norm", type=int, default=5, help="max_grad_norm")
 parser.add_argument("--use_curriculum_learning", type=eval, choices=[True, False], default='True', help="use_curriculum_learning")
-parser.add_argument("--adj_type", type=str, default='symadj', help="scalap, normlap, symadj, transition")
 parser.add_argument("--cl_decay_steps", type=int, default=2000, help="cl_decay_steps")
 parser.add_argument('--gpu', type=int, default=0, help='which gpu to use')
 parser.add_argument('--seed', type=int, default=100, help='random seed.')
@@ -179,21 +175,18 @@ parser.add_argument('--fn_t', type=int, default=12, help='filter negatives thres
 parser.add_argument('--top_k', type=int, default=10, help='graph neighbors threshold, 10 means top 10 nodes')
 parser.add_argument('--schema', type=int, default=1, choices=[0, 1], help='which contra backbone schema to use (0 is no contrast, i.e., baseline)')
 parser.add_argument('--contra_denominator', type=eval, choices=[True, False], default='True', help='whether to contain pos_score in the denominator of contra loss')
-parser.add_argument('--graph', type=eval, choices=[True, False], default='True', help='use graph-level or node-level contra loss')
 args = parser.parse_args()
         
 if args.dataset == 'METRLA':
     data_path = f'../{args.dataset}/metr-la.h5'
-    adj_mx_path = f'../{args.dataset}/adj_mx.pkl'
     args.num_nodes = 207
 elif args.dataset == 'PEMSBAY':
     data_path = f'../{args.dataset}/pems-bay.h5'
-    adj_mx_path = f'../{args.dataset}/adj_mx_bay.pkl'
     args.num_nodes = 325
 else:
     pass # including more datasets in the future    
 
-model_name = 'DGCRNAdj'
+model_name = 'DGCRN'
 timestring = time.strftime('%Y%m%d%H%M%S', time.localtime())
 path = f'../save/{args.dataset}_{model_name}_{timestring}' + '_baseline' if args.schema == 0 else f'../save/{args.dataset}_{model_name}_{timestring}'
 logging_path = f'{path}/{model_name}_{timestring}_logging.txt'
@@ -236,7 +229,6 @@ logger.addHandler(console)
 # logger.info('rnn_units', args.rnn_units)
 # logger.info('embed_dim', args.embed_dim)
 # logger.info('max_diffusion_step', args.max_diffusion_step)
-# logger.info('adj_type', args.adj_type)
 # logger.info('loss', args.loss)
 # logger.info('batch_size', args.batch_size)
 # logger.info('epochs', args.epochs)
