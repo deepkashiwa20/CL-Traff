@@ -160,6 +160,8 @@ def main():
     model_name = 'DGCRNAdj'
     timestring = '20231110122131' if args.schema == 1 else '20231110121859'
     path = f'../save/{args.dataset}_{model_name}_{timestring}' + '_baseline' if args.schema == 0 else f'../save/{args.dataset}_{model_name}_{timestring}'
+    # timestring = '20231116114904' if args.schema == 1 else '20231110121859'
+    # path = f'../save/based_node_embeddings/{args.dataset}_{model_name}_{timestring}' + '_baseline' if args.schema == 0 else f'../save/based_node_embeddings/{args.dataset}_{model_name}_{timestring}'
     modelpt_path = f'{path}/{model_name}_{timestring}.pt'
     visualization(modelpt_path, path)
     
