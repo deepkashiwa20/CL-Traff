@@ -293,8 +293,8 @@ class DGCRN(nn.Module):
         ht_list = [h_t]*self.num_layers
         
         node_embeddings = self.hypernet(h_t) # B, N, d
-        h_t = node_embeddings.sum(dim=1) if self.use_graph else node_embeddings
-        # h_t = h_t.sum(dim=1) if self.use_graph else h_t
+        # h_t = node_embeddings.sum(dim=1) if self.use_graph else node_embeddings
+        h_t = h_t.sum(dim=1) if self.use_graph else h_t
         support = F.softmax(F.relu(torch.einsum('bnc,bmc->bnm', node_embeddings, node_embeddings)), dim=-1) 
         supports_de = [support]
         
