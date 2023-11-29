@@ -267,8 +267,8 @@ if torch.cuda.is_available(): torch.cuda.manual_seed(args.seed)
 
 data = {}
 for category in ['train', 'val', 'test']:
-    cat_data = np.load(os.path.join(f'../{args.dataset}', category + 'his.npz'))
-    # cat_data = np.load(os.path.join(f'../{args.dataset}', category + '.npz'))
+    # cat_data = np.load(os.path.join(f'../{args.dataset}', category + 'his.npz'))
+    cat_data = np.load(os.path.join(f'../{args.dataset}', category + '.npz'))
     data['x_' + category] = cat_data['x']
     data['y_' + category] = cat_data['y']
 scaler = StandardScaler(mean=data['x_train'][..., 0].mean(), std=data['x_train'][..., 0].std())
