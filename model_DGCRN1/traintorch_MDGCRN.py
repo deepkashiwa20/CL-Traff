@@ -129,11 +129,8 @@ def traintest_model():
             y_pred = scaler.inverse_transform(output)
             y_true = y
             mae_loss = masked_mae_loss(y_pred, y_true) # masked_mae_loss(y_pred, y_true)
-            if args.schema == 0:
-                u_loss = torch.zeros_like(mae_loss)
-            else:
-                separate_loss = ContrastiveLoss(infonce=args.contra_type, mask=mask, temp=args.temp)
-                u_loss = separate_loss.calculate(query, pos, neg, mask)
+            separate_loss = ContrastiveLoss(infonce=args.contra_type, mask=mask, temp=args.temp)
+            u_loss = separate_loss.calculate(query, pos, neg, mask)
             compact_loss = nn.MSELoss()
             loss1 = compact_loss(query, pos.detach())
             loss = mae_loss + args.lamb * u_loss + args.lamb1 * loss1
@@ -208,7 +205,6 @@ parser.add_argument('--seed', type=int, default=100, help='random seed.')
 parser.add_argument('--temp', type=float, default=0.1, help='temperature parameter')
 parser.add_argument('--lam', type=float, default=0.1, help='contrastive loss lambda') 
 parser.add_argument('--lam1', type=float, default=0.1, help='compact loss lambda') 
-parser.add_argument('--schema', type=int, default=1, choices=[0, 1], help='which contra backbone schema to use (0 is no contrast, i.e., baseline)')
 parser.add_argument('--contra_type', type=eval, choices=[True, False], default='True', help='whether to use InfoNCE loss or Triplet loss')
 args = parser.parse_args()
         
@@ -223,7 +219,7 @@ else:
 
 model_name = 'MDGCRN'
 timestring = time.strftime('%Y%m%d%H%M%S', time.localtime())
-path = f'../save/{args.dataset}_{model_name}_{timestring}' + '_baseline' if args.schema == 0 else f'../save/{args.dataset}_{model_name}_{timestring}'
+path = f'../save/{args.dataset}_{model_name}_{timestring}'
 logging_path = f'{path}/{model_name}_{timestring}_logging.txt'
 score_path = f'{path}/{model_name}_{timestring}_scores.txt'
 epochlog_path = f'{path}/{model_name}_{timestring}_epochlog.txt'

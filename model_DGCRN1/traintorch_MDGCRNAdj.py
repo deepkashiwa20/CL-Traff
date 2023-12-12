@@ -54,9 +54,9 @@ def get_model():
     adj_mx = load_adj(adj_mx_path, args.adj_type)
     adjs = [torch.tensor(i).to(device) for i in adj_mx]            
     model = MDGCRNAdj(num_nodes=args.num_nodes, input_dim=args.input_dim, output_dim=args.output_dim, horizon=args.horizon, 
-                 rnn_units=args.rnn_units, rnn_layers=args.rnn_layers, cheb_k = args.max_diffusion_step, embed_dim=args.embed_dim, 
-                 adj_mx = adjs, cl_decay_steps=args.cl_decay_steps, use_curriculum_learning=args.use_curriculum_learning, 
-                 contra_type=args.contra_type, device=device).to(device)
+                 rnn_units=args.rnn_units, rnn_layers=args.rnn_layers, cheb_k = args.max_diffusion_step, mem_num=args.mem_num, 
+                 mem_dim=args.mem_dim, embed_dim=args.embed_dim, adj_mx = adjs, cl_decay_steps=args.cl_decay_steps, 
+                 use_curriculum_learning=args.use_curriculum_learning, contra_type=args.contra_type, device=device).to(device)
     return model
 
 def prepare_x_y(x, y):
@@ -134,11 +134,8 @@ def traintest_model():
             y_pred = scaler.inverse_transform(output)
             y_true = y
             mae_loss = masked_mae_loss(y_pred, y_true) # masked_mae_loss(y_pred, y_true)
-            if args.schema == 0:
-                u_loss = torch.zeros_like(mae_loss)
-            else:
-                separate_loss = ContrastiveLoss(infonce=args.contra_type, mask=mask, temp=args.temp)
-                u_loss = separate_loss.calculate(query, pos, neg, mask)
+            separate_loss = ContrastiveLoss(infonce=args.contra_type, mask=mask, temp=args.temp)
+            u_loss = separate_loss.calculate(query, pos, neg, mask)
             compact_loss = nn.MSELoss()
             loss1 = compact_loss(query, pos.detach())
             loss = mae_loss + args.lamb * u_loss + args.lamb1 * loss1
@@ -191,6 +188,8 @@ parser.add_argument('--embed_dim', type=int, default=10, help='embedding dimensi
 parser.add_argument('--max_diffusion_step', type=int, default=3, help='max diffusion step or Cheb K')
 parser.add_argument('--rnn_layers', type=int, default=1, help='number of rnn layers')
 parser.add_argument('--rnn_units', type=int, default=128, help='number of rnn units')
+parser.add_argument('--mem_num', type=int, default=20, help='number of meta-nodes/prototypes')
+parser.add_argument('--mem_dim', type=int, default=64, help='dimension of meta-nodes/prototypes')
 parser.add_argument("--loss", type=str, default='mask_mae_loss', help="mask_mae_loss")
 parser.add_argument("--epochs", type=int, default=200, help="number of epochs of training")
 parser.add_argument("--patience", type=int, default=20, help="patience used for early stop")
@@ -209,7 +208,6 @@ parser.add_argument('--seed', type=int, default=100, help='random seed.')
 parser.add_argument('--temp', type=float, default=0.1, help='temperature parameter')
 parser.add_argument('--lamb', type=float, default=0.1, help='loss lambda') 
 parser.add_argument('--lamb1', type=float, default=0.1, help='compact loss lambda') 
-parser.add_argument('--schema', type=int, default=1, choices=[0, 1], help='which contra backbone schema to use (0 is no contrast, i.e., baseline)')
 parser.add_argument('--contra_type', type=eval, choices=[True, False], default='True', help='whether to contain pos_score in the denominator of contra loss')
 args = parser.parse_args()
         
@@ -226,7 +224,7 @@ else:
 
 model_name = 'MDGCRNAdj'
 timestring = time.strftime('%Y%m%d%H%M%S', time.localtime())
-path = f'../save/{args.dataset}_{model_name}_{timestring}' + '_baseline' if args.schema == 0 else f'../save/{args.dataset}_{model_name}_{timestring}'
+path = f'../save/{args.dataset}_{model_name}_{timestring}'
 logging_path = f'{path}/{model_name}_{timestring}_logging.txt'
 score_path = f'{path}/{model_name}_{timestring}_scores.txt'
 epochlog_path = f'{path}/{model_name}_{timestring}_epochlog.txt'
