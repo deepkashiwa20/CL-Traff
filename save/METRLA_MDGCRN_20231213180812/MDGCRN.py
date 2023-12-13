@@ -118,11 +118,11 @@ class ADCRNN_Decoder(nn.Module):
         return current_inputs, output_hidden
 
 
-class MDGCRNAdj(nn.Module):
+class MDGCRN(nn.Module):
     def __init__(self, num_nodes, input_dim, output_dim, horizon, rnn_units, rnn_layers=1, cheb_k=3,
-                 ycov_dim=1, mem_num=20, mem_dim=64, embed_dim=10, adj_mx=None, cl_decay_steps=2000, 
-                 use_curriculum_learning=True, contra_loss='triplet', device="cpu"):
-        super(MDGCRNAdj, self).__init__()
+                 ycov_dim=1, mem_num=20, mem_dim=64, embed_dim=10, cl_decay_steps=2000, use_curriculum_learning=True,
+                 contra_type=True, device="cpu"):
+        super(MDGCRN, self).__init__()
         self.num_nodes = num_nodes
         self.input_dim = input_dim
         self.rnn_units = rnn_units
@@ -135,7 +135,7 @@ class MDGCRNAdj(nn.Module):
         self.cl_decay_steps = cl_decay_steps
         self.use_curriculum_learning = use_curriculum_learning
         # TODO: support contrastive learning
-        self.contra_loss = contra_loss
+        self.contra_type = contra_type
         self.device = device
         
         # memory
@@ -154,7 +154,7 @@ class MDGCRNAdj(nn.Module):
         self.proj = nn.Sequential(nn.Linear(self.decoder_dim, self.output_dim, bias=True))
         
         # graph
-        self.adj_mx = adj_mx
+        self.node_embeddings = nn.Parameter(torch.randn(self.num_nodes, self.embed_dim), requires_grad=True) # N, e
         self.hypernet = nn.Sequential(nn.Linear(self.rnn_units + self.mem_dim, self.embed_dim, bias=True))
         
     def compute_sampling_threshold(self, batches_seen):
@@ -174,20 +174,19 @@ class MDGCRNAdj(nn.Module):
         value = torch.matmul(att_score, self.memory['Memory'])     # (B, N, d)
         _, ind = torch.topk(att_score, k=2, dim=-1)
         pos = self.memory['Memory'][ind[:, :, 0]] # B, N, d
-        if self.contra_loss in ['infonce']:  # InfoNCE loss
+        if self.contra_type:  # InfoNCE loss
             neg = self.memory['Memory'].repeat(query.shape[0], self.num_nodes, 1, 1)  # (B, N, M, d)
             mask_index = ind[:, :, [0]]  # B, N, 1
             mask = torch.zeros_like(att_score, dtype=torch.bool).to(att_score.device)  # B, N, M
             mask = mask.scatter(-1, mask_index, True)  
-        elif self.contra_loss in ['triplet']:  # Triplet loss
+        else:  # Triplet loss
             neg = self.memory['Memory'][ind[:, :, 1]] # B, N, d
             mask = None
-        else:
-            pass
         return value, query, pos, neg, mask
             
     def forward(self, x, x_cov, y_cov, labels=None, batches_seen=None):
-        supports_en = self.adj_mx
+        support = F.softmax(F.relu(torch.mm(self.node_embeddings, self.node_embeddings.transpose(0, 1))), dim=1)
+        supports_en = [support]
         init_state = self.encoder.init_hidden(x.shape[0])
         h_en, state_en = self.encoder(x, init_state, supports_en) # B, T, N, hidden
         h_t = h_en[:, -1, :, :] # B, N, hidden (last state)        
@@ -239,7 +238,7 @@ def main():
     parser.add_argument('--rnn_units', type=int, default=64, help='number of hidden units')
     args = parser.parse_args()
     device = torch.device("cuda:{}".format(args.gpu)) if torch.cuda.is_available() else torch.device("cpu")
-    model = MemDGCRN(num_nodes=args.num_variable, input_dim=args.channelin, output_dim=args.channelout, horizon=args.seq_len, rnn_units=args.rnn_units).to(device)
+    model = MDGCRN(num_nodes=args.num_variable, input_dim=args.channelin, output_dim=args.channelout, horizon=args.seq_len, rnn_units=args.rnn_units).to(device)
     summary(model, [(args.his_len, args.num_variable, args.channelin), (args.seq_len, args.num_variable, args.channelout)], device=device)
     print_params(model)
     

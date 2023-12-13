@@ -15,8 +15,8 @@ from utils import StandardScaler, DataLoader, masked_mae_loss, masked_mape_loss,
 from MDGCRN import MDGCRN
 
 class ContrastiveLoss():
-    def __init__(self, infonce=True, mask=None, temp=0.1, margin=1.0):
-        self.infonce = infonce
+    def __init__(self, contra_loss='triplet', mask=None, temp=0.1, margin=1.0):
+        self.infonce = contra_loss in ['infonce']
         self.mask = mask
         self.temp = temp
         self.margin = margin
@@ -53,7 +53,7 @@ def get_model():
     model = MDGCRN(num_nodes=args.num_nodes, input_dim=args.input_dim, output_dim=args.output_dim, horizon=args.horizon, 
                  rnn_units=args.rnn_units, rnn_layers=args.rnn_layers, cheb_k=args.max_diffusion_step, mem_num=args.mem_num, mem_dim=args.mem_dim,
                  embed_dim=args.embed_dim, cl_decay_steps=args.cl_decay_steps, use_curriculum_learning=args.use_curriculum_learning,  
-                 contra_type=args.contra_type, device=device).to(device)
+                 contra_loss=args.contra_loss, device=device).to(device)
     return model
 
 def prepare_x_y(x, y):
@@ -129,7 +129,7 @@ def traintest_model():
             y_pred = scaler.inverse_transform(output)
             y_true = y
             mae_loss = masked_mae_loss(y_pred, y_true) # masked_mae_loss(y_pred, y_true)
-            separate_loss = ContrastiveLoss(infonce=args.contra_type, mask=mask, temp=args.temp)
+            separate_loss = ContrastiveLoss(contra_loss=args.contra_loss, mask=mask, temp=args.temp)
             u_loss = separate_loss.calculate(query, pos, neg, mask)
             compact_loss = nn.MSELoss()
             loss1 = compact_loss(query, pos.detach())
@@ -203,7 +203,7 @@ parser.add_argument('--seed', type=int, default=100, help='random seed.')
 parser.add_argument('--temp', type=float, default=0.1, help='temperature parameter')
 parser.add_argument('--lamb', type=float, default=0.1, help='lamb value for separate loss')
 parser.add_argument('--lamb1', type=float, default=0.1, help='lamb1 value for compact loss')
-parser.add_argument('--contra_type', type=eval, choices=[True, False], default='True', help='whether to use InfoNCE loss or Triplet loss')
+parser.add_argument('--contra_loss', type=eval, choices=['triplet', 'infonce'], default='triplet', help='whether to triplet or infonce contra loss')
 args = parser.parse_args()
         
 if args.dataset == 'METRLA':

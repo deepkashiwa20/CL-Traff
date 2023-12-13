@@ -121,7 +121,7 @@ class ADCRNN_Decoder(nn.Module):
 class MDGCRN(nn.Module):
     def __init__(self, num_nodes, input_dim, output_dim, horizon, rnn_units, rnn_layers=1, cheb_k=3,
                  ycov_dim=1, mem_num=20, mem_dim=64, embed_dim=10, cl_decay_steps=2000, use_curriculum_learning=True,
-                 contra_type=True, device="cpu"):
+                 contra_loss='triplet', device="cpu"):
         super(MDGCRN, self).__init__()
         self.num_nodes = num_nodes
         self.input_dim = input_dim
@@ -135,7 +135,7 @@ class MDGCRN(nn.Module):
         self.cl_decay_steps = cl_decay_steps
         self.use_curriculum_learning = use_curriculum_learning
         # TODO: support contrastive learning
-        self.contra_type = contra_type
+        self.contra_loss = contra_loss
         self.device = device
         
         # memory
@@ -174,14 +174,16 @@ class MDGCRN(nn.Module):
         value = torch.matmul(att_score, self.memory['Memory'])     # (B, N, d)
         _, ind = torch.topk(att_score, k=2, dim=-1)
         pos = self.memory['Memory'][ind[:, :, 0]] # B, N, d
-        if self.contra_type:  # InfoNCE loss
+        if self.contra_loss in ['infonce']:  # InfoNCE loss
             neg = self.memory['Memory'].repeat(query.shape[0], self.num_nodes, 1, 1)  # (B, N, M, d)
             mask_index = ind[:, :, [0]]  # B, N, 1
             mask = torch.zeros_like(att_score, dtype=torch.bool).to(att_score.device)  # B, N, M
             mask = mask.scatter(-1, mask_index, True)  
-        else:  # Triplet loss
+        elif self.contra_loss in ['triplet']:  # Triplet loss
             neg = self.memory['Memory'][ind[:, :, 1]] # B, N, d
             mask = None
+        else:
+            pass
         return value, query, pos, neg, mask
             
     def forward(self, x, x_cov, y_cov, labels=None, batches_seen=None):
