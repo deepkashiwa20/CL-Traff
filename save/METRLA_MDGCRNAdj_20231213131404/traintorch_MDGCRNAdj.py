@@ -8,11 +8,12 @@ import torch
 import torch.nn as nn
 import torch.nn.init as init
 import torch.nn.functional as F
-from torchsummary import summary
+from torchinfo import summary
 import argparse
 import logging
-from utils import StandardScaler, DataLoader, masked_mae_loss, masked_mape_loss, masked_mse_loss, masked_rmse_loss
-from MDGCRN import MDGCRN
+from utils import StandardScaler, masked_mae_loss, masked_mape_loss, masked_mse_loss, masked_rmse_loss
+from utils import load_adj
+from MDGCRNAdj import MDGCRNAdj
 
 class ContrastiveLoss():
     def __init__(self, infonce=True, mask=None, temp=0.1, margin=1.0):
@@ -49,11 +50,13 @@ def print_model(model):
     logger.info(f'In total: {param_count} trainable parameters.')
     return
 
-def get_model():  
-    model = MDGCRN(num_nodes=args.num_nodes, input_dim=args.input_dim, output_dim=args.output_dim, horizon=args.horizon, 
-                 rnn_units=args.rnn_units, rnn_layers=args.rnn_layers, cheb_k=args.max_diffusion_step, mem_num=args.mem_num, mem_dim=args.mem_dim,
-                 embed_dim=args.embed_dim, cl_decay_steps=args.cl_decay_steps, use_curriculum_learning=args.use_curriculum_learning,  
-                 contra_type=args.contra_type, device=device).to(device)
+def get_model():
+    adj_mx = load_adj(adj_mx_path, args.adj_type)
+    adjs = [torch.tensor(i).to(device) for i in adj_mx]            
+    model = MDGCRNAdj(num_nodes=args.num_nodes, input_dim=args.input_dim, output_dim=args.output_dim, horizon=args.horizon, 
+                 rnn_units=args.rnn_units, rnn_layers=args.rnn_layers, cheb_k = args.max_diffusion_step, mem_num=args.mem_num, 
+                 mem_dim=args.mem_dim, embed_dim=args.embed_dim, adj_mx = adjs, cl_decay_steps=args.cl_decay_steps, 
+                 use_curriculum_learning=args.use_curriculum_learning, contra_type=args.contra_type, device=device).to(device)
     return model
 
 def prepare_x_y(x, y):
@@ -70,12 +73,13 @@ def prepare_x_y(x, y):
     y0 = y[..., 0:1]
     y1 = y[..., 1:2]
     return x0.to(device), x1.to(device), y0.to(device), y1.to(device) # x, x_cov, y, y_cov
-    
+
 def evaluate(model, mode):
     with torch.no_grad():
         model = model.eval()
         data_iter =  data[f'{mode}_loader']#.get_iterator()
-        losses, ys_true, ys_pred = [], [], []
+        ys_true, ys_pred = [], []
+        losses = []
         for x, y in data_iter:
             x, x_cov, y, y_cov = prepare_x_y(x, y)
             output, h_att, query, pos, neg, mask = model(x, x_cov, y_cov)
@@ -84,7 +88,7 @@ def evaluate(model, mode):
             ys_true.append(y_true)
             ys_pred.append(y_pred)
             losses.append(masked_mae_loss(y_pred, y_true).item())
-    
+        
         ys_true, ys_pred = torch.cat(ys_true, dim=0), torch.cat(ys_pred, dim=0)
         loss = masked_mae_loss(ys_pred, ys_true)
 
@@ -108,7 +112,8 @@ def evaluate(model, mode):
             logger.info('Horizon 60mins: mae: {:.4f}, mape: {:.4f}, rmse: {:.4f}'.format(mae_12, mape_12 * 100, rmse_12))
 
         return np.mean(losses), ys_true, ys_pred
-        
+
+    
 def traintest_model():  
     model = get_model()
     print_model(model)
@@ -141,7 +146,7 @@ def traintest_model():
             losses.append(loss.item())
             batches_seen += 1
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm) # gradient clipping - this does it in place
             optimizer.step()
         train_loss = np.mean(losses)
         train_mae_loss = np.mean(mae_losses) 
@@ -153,7 +158,7 @@ def traintest_model():
         message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, train_mae_loss: {:.4f}, train_contra_loss: {:.4f}, train_conpact_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.1f}s'.format(epoch_num + 1, args.epochs, batches_seen, train_loss, train_mae_loss, train_contra_loss, train_compact_loss, val_loss, optimizer.param_groups[0]['lr'], (end_time2 - start_time))
         logger.info(message)
         test_loss, _, _ = evaluate(model, 'test')
-        
+
         if val_loss < min_val_loss:
             wait = 0
             min_val_loss = val_loss
@@ -179,12 +184,12 @@ parser.add_argument('--seq_len', type=int, default=12, help='input sequence leng
 parser.add_argument('--horizon', type=int, default=12, help='output sequence length')
 parser.add_argument('--input_dim', type=int, default=1, help='number of input channel')
 parser.add_argument('--output_dim', type=int, default=1, help='number of output channel')
+parser.add_argument('--embed_dim', type=int, default=10, help='embedding dimension for adaptive graph')
 parser.add_argument('--max_diffusion_step', type=int, default=3, help='max diffusion step or Cheb K')
 parser.add_argument('--rnn_layers', type=int, default=1, help='number of rnn layers')
-parser.add_argument('--rnn_units', type=int, default=64, help='number of rnn units')
+parser.add_argument('--rnn_units', type=int, default=128, help='number of rnn units')
 parser.add_argument('--mem_num', type=int, default=20, help='number of meta-nodes/prototypes')
 parser.add_argument('--mem_dim', type=int, default=64, help='dimension of meta-nodes/prototypes')
-parser.add_argument('--embed_dim', type=int, default=10, help='dimension of node embeddings')
 parser.add_argument("--loss", type=str, default='mask_mae_loss', help="mask_mae_loss")
 parser.add_argument("--epochs", type=int, default=200, help="number of epochs of training")
 parser.add_argument("--patience", type=int, default=20, help="patience used for early stop")
@@ -195,27 +200,29 @@ parser.add_argument("--lr_decay_ratio", type=float, default=0.1, help="lr_decay_
 parser.add_argument("--epsilon", type=float, default=1e-3, help="optimizer epsilon")
 parser.add_argument("--max_grad_norm", type=int, default=5, help="max_grad_norm")
 parser.add_argument("--use_curriculum_learning", type=eval, choices=[True, False], default='True', help="use_curriculum_learning")
+parser.add_argument("--adj_type", type=str, default='symadj', help="scalap, normlap, symadj, transition")
 parser.add_argument("--cl_decay_steps", type=int, default=2000, help="cl_decay_steps")
-parser.add_argument('--test_every_n_epochs', type=int, default=5, help='test_every_n_epochs')
 parser.add_argument('--gpu', type=int, default=0, help='which gpu to use')
 parser.add_argument('--seed', type=int, default=100, help='random seed.')
 # TODO: support contra learning
 parser.add_argument('--temp', type=float, default=0.1, help='temperature parameter')
-parser.add_argument('--lamb', type=float, default=0.1, help='lamb value for separate loss')
-parser.add_argument('--lamb1', type=float, default=0.1, help='lamb1 value for compact loss')
-parser.add_argument('--contra_type', type=eval, choices=[True, False], default='True', help='whether to use InfoNCE loss or Triplet loss')
+parser.add_argument('--lamb', type=float, default=0.1, help='loss lambda') 
+parser.add_argument('--lamb1', type=float, default=0.1, help='compact loss lambda') 
+parser.add_argument('--contra_type', type=eval, choices=[True, False], default='True', help='whether to contain pos_score in the denominator of contra loss')
 args = parser.parse_args()
         
 if args.dataset == 'METRLA':
     data_path = f'../{args.dataset}/metr-la.h5'
+    adj_mx_path = f'../{args.dataset}/adj_mx.pkl'
     args.num_nodes = 207
 elif args.dataset == 'PEMSBAY':
     data_path = f'../{args.dataset}/pems-bay.h5'
+    adj_mx_path = f'../{args.dataset}/adj_mx_bay.pkl'
     args.num_nodes = 325
 else:
     pass # including more datasets in the future    
 
-model_name = 'MDGCRN'
+model_name = 'MDGCRNAdj'
 timestring = time.strftime('%Y%m%d%H%M%S', time.localtime())
 path = f'../save/{args.dataset}_{model_name}_{timestring}'
 logging_path = f'{path}/{model_name}_{timestring}_logging.txt'
@@ -256,13 +263,10 @@ logger.addHandler(console)
 # logger.info('output_dim', args.output_dim)
 # logger.info('rnn_layers', args.rnn_layers)
 # logger.info('rnn_units', args.rnn_units)
-# logger.info('max_diffusion_step', args.max_diffusion_step)
-# logger.info('mem_num', args.mem_num)
-# logger.info('mem_dim', args.mem_dim)
 # logger.info('embed_dim', args.embed_dim)
+# logger.info('max_diffusion_step', args.max_diffusion_step)
+# logger.info('adj_type', args.adj_type)
 # logger.info('loss', args.loss)
-# logger.info('separate loss lamb', args.lamb)
-# logger.info('compact loss lamb1', args.lamb1)
 # logger.info('batch_size', args.batch_size)
 # logger.info('epochs', args.epochs)
 # logger.info('patience', args.patience)
@@ -271,6 +275,7 @@ logger.addHandler(console)
 # logger.info('steps', args.steps)
 # logger.info('lr_decay_ratio', args.lr_decay_ratio)
 # logger.info('use_curriculum_learning', args.use_curriculum_learning)
+# logger.info('cl_decay_steps', args.cl_decay_steps)
 
 message = ''.join([f'{k}: {v}\n' for k, v in vars(args).items()])
 logger.info(message)
@@ -291,7 +296,7 @@ if torch.cuda.is_available(): torch.cuda.manual_seed(args.seed)
 
 data = {}
 for category in ['train', 'val', 'test']:
-    cat_data = np.load(os.path.join(f'../{args.dataset}', category + '.npz'))
+    cat_data = np.load(os.path.join(f'../{args.dataset}', category + 'his.npz'))
     data['x_' + category] = cat_data['x']
     data['y_' + category] = cat_data['y']
 scaler = StandardScaler(mean=data['x_train'][..., 0].mean(), std=data['x_train'][..., 0].std())
@@ -325,3 +330,5 @@ def main():
     
 if __name__ == '__main__':
     main()
+    
+# nohup python traintest_DGCRN.py --gpu 3 > LA_noTrY.log 2>&1 &

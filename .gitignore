@@ -5,8 +5,11 @@ raw_data
 raw_data.zip
 PEMS0*
 METRLA/metr-la-plus.h5
+METRLA/adj_mx_ha_la.pkl
 visualizations/results
 model/GCRN_old.py
 model/traintest+_GCRN_old.py
 model/traintest_GCRN_old.py
 visualizations/METRLA
+METRLA/day-ha-la.pkl
+METRLA/week-ha-la.pkl
