@@ -208,7 +208,7 @@ parser.add_argument('--seed', type=int, default=100, help='random seed.')
 parser.add_argument('--temp', type=float, default=0.1, help='temperature parameter')
 parser.add_argument('--lamb', type=float, default=0.1, help='loss lambda') 
 parser.add_argument('--lamb1', type=float, default=0.1, help='compact loss lambda') 
-parser.add_argument('--contra_loss', type=eval, choices=['triplet', 'infonce'], default='triplet', help='whether to triplet or infonce contra loss')
+parser.add_argument('--contra_loss', type=str, choices=['triplet', 'infonce'], default='triplet', help='whether to triplet or infonce contra loss')
 args = parser.parse_args()
         
 if args.dataset == 'METRLA':
