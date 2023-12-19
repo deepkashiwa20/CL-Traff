@@ -13,7 +13,8 @@ import argparse
 import logging
 from utils import StandardScaler, masked_mae_loss, masked_mape_loss, masked_mse_loss, masked_rmse_loss
 from utils import load_adj
-from MDGCRNAdj import MDGCRNAdj
+from metrics import RMSE, MAE
+from MDGCRNAdjHi import MDGCRNAdjHi
 
 class ContrastiveLoss():
     def __init__(self, contra_loss='triplet', mask=None, temp=0.1, margin=1.0):
@@ -35,7 +36,6 @@ class ContrastiveLoss():
         else:
             score_matrix = F.cosine_similarity(query.unsqueeze(-2), neg, dim=-1)  # (B, N, M)
             # score_matrix = -1.0 * torch.sqrt(torch.sum((query.unsqueeze(-2) - neg) ** 2, dim=-1))
-            # score_matrix = torch.softmax(torch.matmul(query.unsqueeze(-2), neg.transpose(-1, -2)).squeeze(-2), dim=-1)  
             score_matrix = torch.exp(score_matrix / self.temp)
             pos_sum = torch.sum(score_matrix * mask, dim=-1)
             ratio = pos_sum / torch.sum(score_matrix, dim=-1)
@@ -55,7 +55,7 @@ def print_model(model):
 def get_model():
     adj_mx = load_adj(adj_mx_path, args.adj_type)
     adjs = [torch.tensor(i).to(device) for i in adj_mx]            
-    model = MDGCRNAdj(num_nodes=args.num_nodes, input_dim=args.input_dim, output_dim=args.output_dim, horizon=args.horizon, 
+    model = MDGCRNAdjHi(num_nodes=args.num_nodes, input_dim=args.input_dim, output_dim=args.output_dim, horizon=args.horizon, 
                  rnn_units=args.rnn_units, rnn_layers=args.rnn_layers, cheb_k = args.max_diffusion_step, mem_num=args.mem_num, 
                  mem_dim=args.mem_dim, embed_dim=args.embed_dim, adj_mx = adjs, cl_decay_steps=args.cl_decay_steps, 
                  use_curriculum_learning=args.use_curriculum_learning, contra_loss=args.contra_loss, device=device).to(device)
@@ -72,9 +72,11 @@ def prepare_x_y(x, y):
     """
     x0 = x[..., 0:1]
     x1 = x[..., 1:2]
+    x2 = x[..., 2:3]  # HI
     y0 = y[..., 0:1]
     y1 = y[..., 1:2]
-    return x0.to(device), x1.to(device), y0.to(device), y1.to(device) # x, x_cov, y, y_cov
+    y2 = y[..., 2:3]
+    return x0.to(device), x1.to(device), x2.to(device), y0.to(device), y1.to(device), y2.to(device) # x, x_cov, y, y_cov
 
 def evaluate(model, mode):
     with torch.no_grad():
@@ -83,8 +85,8 @@ def evaluate(model, mode):
         ys_true, ys_pred = [], []
         losses = []
         for x, y in data_iter:
-            x, x_cov, y, y_cov = prepare_x_y(x, y)
-            output, h_att, query, pos, neg, mask = model(x, x_cov, y_cov)
+            x, x_cov, x_his, y, y_cov, _ = prepare_x_y(x, y)
+            output, h_att, query, pos, neg, mask = model(x, x_cov, scaler.transform(x_his), y_cov)
             y_pred = scaler.inverse_transform(output)
             y_true = y
             ys_true.append(y_true)
@@ -131,14 +133,21 @@ def traintest_model():
         losses, mae_losses, contra_losses, compact_losses = [], [], [], []
         for x, y in data_iter:
             optimizer.zero_grad()
-            x, x_cov, y, y_cov = prepare_x_y(x, y)
-            output, h_att, query, pos, neg, mask = model(x, x_cov, y_cov, scaler.transform(y), batches_seen)
+            x, x_cov, x_his, y, y_cov, _ = prepare_x_y(x, y)
+            output, h_att, query, pos, neg, mask = model(x, x_cov, scaler.transform(x_his), y_cov, scaler.transform(y), batches_seen)
             y_pred = scaler.inverse_transform(output)
             y_true = y
             mae_loss = masked_mae_loss(y_pred, y_true) # masked_mae_loss(y_pred, y_true)
             separate_loss = ContrastiveLoss(contra_loss=args.contra_loss, mask=mask, temp=args.temp)
             u_loss = separate_loss.calculate(query, pos, neg, mask)
-            compact_loss = nn.MSELoss()
+            if args.compact_loss == 'mse':
+                compact_loss = nn.MSELoss()
+            elif args.compact_loss == 'rmse':
+                compact_loss = RMSE
+            elif args.compact_loss == 'mae':
+                compact_loss = MAE
+            else:
+                pass
             loss1 = compact_loss(query, pos.detach())
             loss = mae_loss + args.lamb * u_loss + args.lamb1 * loss1
             losses.append(loss.item())
@@ -207,11 +216,11 @@ parser.add_argument("--cl_decay_steps", type=int, default=2000, help="cl_decay_s
 parser.add_argument('--gpu', type=int, default=0, help='which gpu to use')
 parser.add_argument('--seed', type=int, default=100, help='random seed.')
 # TODO: support contra learning
-parser.add_argument('--temp', type=float, default=1.0, help='temperature parameter')  # 0.1
-parser.add_argument('--lamb', type=float, default=0.1, help='loss lambda')   # 0.1
-parser.add_argument('--lamb1', type=float, default=1.0, help='compact loss lambda')   # 0.1
-# parser.add_argument('--contra_loss', type=str, choices=['triplet', 'infonce'], default='triplet', help='whether to triplet or infonce contra loss')
+parser.add_argument('--temp', type=float, default=1.0, help='temperature parameter')
+parser.add_argument('--lamb', type=float, default=0.1, help='loss lambda') 
+parser.add_argument('--lamb1', type=float, default=1.0, help='compact loss lambda') 
 parser.add_argument('--contra_loss', type=str, choices=['triplet', 'infonce'], default='infonce', help='whether to triplet or infonce contra loss')
+parser.add_argument('--compact_loss', type=str, choices=['mse', 'rmse', 'mae'], default='mse', help='whether to triplet or infonce contra loss')
 args = parser.parse_args()
         
 if args.dataset == 'METRLA':
@@ -225,7 +234,7 @@ elif args.dataset == 'PEMSBAY':
 else:
     pass # including more datasets in the future    
 
-model_name = 'MDGCRNAdj'
+model_name = 'MDGCRNAdjHi'
 timestring = time.strftime('%Y%m%d%H%M%S', time.localtime())
 path = f'../save/{args.dataset}_{model_name}_{timestring}'
 logging_path = f'{path}/{model_name}_{timestring}_logging.txt'

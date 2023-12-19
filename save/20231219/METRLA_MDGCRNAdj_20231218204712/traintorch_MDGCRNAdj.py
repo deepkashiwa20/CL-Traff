@@ -33,9 +33,9 @@ class ContrastiveLoss():
             separate_loss = nn.TripletMarginLoss(margin=self.margin)
             return separate_loss(query, pos.detach(), neg.detach())
         else:
-            score_matrix = F.cosine_similarity(query.unsqueeze(-2), neg, dim=-1)  # (B, N, M)
+            # score_matrix = F.cosine_similarity(query.unsqueeze(-2), neg, dim=-1)  # (B, N, M)
             # score_matrix = -1.0 * torch.sqrt(torch.sum((query.unsqueeze(-2) - neg) ** 2, dim=-1))
-            # score_matrix = torch.softmax(torch.matmul(query.unsqueeze(-2), neg.transpose(-1, -2)).squeeze(-2), dim=-1)  
+            score_matrix = torch.softmax(torch.matmul(query.unsqueeze(-2), neg.transpose(-1, -2)).squeeze(-2), dim=-1)  
             score_matrix = torch.exp(score_matrix / self.temp)
             pos_sum = torch.sum(score_matrix * mask, dim=-1)
             ratio = pos_sum / torch.sum(score_matrix, dim=-1)

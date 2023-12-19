@@ -34,8 +34,6 @@ class ContrastiveLoss():
             return separate_loss(query, pos.detach(), neg.detach())
         else:
             score_matrix = F.cosine_similarity(query.unsqueeze(-2), neg, dim=-1)  # (B, N, M)
-            # score_matrix = -1.0 * torch.sqrt(torch.sum((query.unsqueeze(-2) - neg) ** 2, dim=-1))
-            # score_matrix = torch.softmax(torch.matmul(query.unsqueeze(-2), neg.transpose(-1, -2)).squeeze(-2), dim=-1)  
             score_matrix = torch.exp(score_matrix / self.temp)
             pos_sum = torch.sum(score_matrix * mask, dim=-1)
             ratio = pos_sum / torch.sum(score_matrix, dim=-1)
@@ -157,7 +155,7 @@ def traintest_model():
         lr_scheduler.step()
         val_loss, _, _ = evaluate(model, 'val')
         end_time2 = time.time()
-        message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, train_mae_loss: {:.4f}, train_contra_loss: {:.4f}, train_compact_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.1f}s'.format(epoch_num + 1, args.epochs, batches_seen, train_loss, train_mae_loss, train_contra_loss, train_compact_loss, val_loss, optimizer.param_groups[0]['lr'], (end_time2 - start_time))
+        message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, train_mae_loss: {:.4f}, train_contra_loss: {:.4f}, train_conpact_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.1f}s'.format(epoch_num + 1, args.epochs, batches_seen, train_loss, train_mae_loss, train_contra_loss, train_compact_loss, val_loss, optimizer.param_groups[0]['lr'], (end_time2 - start_time))
         logger.info(message)
         test_loss, _, _ = evaluate(model, 'test')
 
@@ -207,11 +205,10 @@ parser.add_argument("--cl_decay_steps", type=int, default=2000, help="cl_decay_s
 parser.add_argument('--gpu', type=int, default=0, help='which gpu to use')
 parser.add_argument('--seed', type=int, default=100, help='random seed.')
 # TODO: support contra learning
-parser.add_argument('--temp', type=float, default=1.0, help='temperature parameter')  # 0.1
-parser.add_argument('--lamb', type=float, default=0.1, help='loss lambda')   # 0.1
-parser.add_argument('--lamb1', type=float, default=1.0, help='compact loss lambda')   # 0.1
-# parser.add_argument('--contra_loss', type=str, choices=['triplet', 'infonce'], default='triplet', help='whether to triplet or infonce contra loss')
-parser.add_argument('--contra_loss', type=str, choices=['triplet', 'infonce'], default='infonce', help='whether to triplet or infonce contra loss')
+parser.add_argument('--temp', type=float, default=0.1, help='temperature parameter')
+parser.add_argument('--lamb', type=float, default=0.1, help='loss lambda') 
+parser.add_argument('--lamb1', type=float, default=0.1, help='compact loss lambda') 
+parser.add_argument('--contra_loss', type=str, choices=['triplet', 'infonce'], default='triplet', help='whether to triplet or infonce contra loss')
 args = parser.parse_args()
         
 if args.dataset == 'METRLA':

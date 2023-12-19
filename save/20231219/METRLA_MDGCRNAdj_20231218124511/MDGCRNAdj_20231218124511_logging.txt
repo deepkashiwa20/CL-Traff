@@ -1,0 +1,401 @@
+dataset: METRLA
+trainval_ratio: 0.8
+val_ratio: 0.125
+num_nodes: 207
+seq_len: 12
+horizon: 12
+input_dim: 1
+output_dim: 1
+embed_dim: 10
+max_diffusion_step: 3
+rnn_layers: 1
+rnn_units: 128
+mem_num: 20
+mem_dim: 64
+loss: mask_mae_loss
+epochs: 200
+patience: 20
+batch_size: 64
+lr: 0.01
+steps: [50, 100]
+lr_decay_ratio: 0.1
+epsilon: 0.001
+max_grad_norm: 5
+use_curriculum_learning: True
+adj_type: symadj
+cl_decay_steps: 2000
+gpu: 1
+seed: 100
+temp: 1.0
+lamb: 0.01
+lamb1: 0.0
+contra_loss: infonce
+ 
+METRLA training and testing started Mon Dec 18 12:45:33 2023
+train xs.shape, ys.shape (23974, 12, 207, 3) (23974, 12, 207, 3)
+val xs.shape, ys.shape (3425, 12, 207, 3) (3425, 12, 207, 3)
+test xs.shape, ys.shape (6850, 12, 207, 3) (6850, 12, 207, 3)
+Trainable parameter list: 
+In total: 496395 trainable parameters. 
+Epoch [1/200] (375) train_loss: 2.6433, train_mae_loss: 2.6220, train_contra_loss: 2.1304, train_conpact_loss: 0.0360, val_loss: 3.6189, lr: 0.010000, 88.6s 
+Horizon overall: mae: 4.0675, mape: 11.8314, rmse: 8.0646 
+Horizon 15mins: mae: 3.2427, mape: 8.7720, rmse: 6.3862 
+Horizon 30mins: mae: 4.0280, mape: 11.6126, rmse: 7.9899 
+Horizon 60mins: mae: 5.3003, mape: 16.4837, rmse: 10.0557 
+Epoch [2/200] (750) train_loss: 2.3856, train_mae_loss: 2.3682, train_contra_loss: 1.7373, train_conpact_loss: 0.0364, val_loss: 3.5341, lr: 0.010000, 93.8s 
+Horizon overall: mae: 3.9791, mape: 10.6049, rmse: 8.2345 
+Horizon 15mins: mae: 3.1175, mape: 8.0126, rmse: 6.2105 
+Horizon 30mins: mae: 3.8941, mape: 10.3857, rmse: 7.9558 
+Horizon 60mins: mae: 5.3243, mape: 14.5653, rmse: 10.7484 
+Epoch [3/200] (1125) train_loss: 2.3387, train_mae_loss: 2.3232, train_contra_loss: 1.5491, train_conpact_loss: 0.0544, val_loss: 3.2994, lr: 0.010000, 96.9s 
+Horizon overall: mae: 3.6925, mape: 10.4921, rmse: 7.4149 
+Horizon 15mins: mae: 3.0347, mape: 8.1143, rmse: 5.9113 
+Horizon 30mins: mae: 3.6753, mape: 10.4334, rmse: 7.3405 
+Horizon 60mins: mae: 4.6725, mape: 14.0173, rmse: 9.2182 
+Epoch [4/200] (1500) train_loss: 2.2964, train_mae_loss: 2.2817, train_contra_loss: 1.4618, train_conpact_loss: 0.1135, val_loss: 3.2212, lr: 0.010000, 94.3s 
+Horizon overall: mae: 3.5933, mape: 9.9233, rmse: 7.3528 
+Horizon 15mins: mae: 2.9797, mape: 7.8019, rmse: 5.8639 
+Horizon 30mins: mae: 3.5771, mape: 9.8666, rmse: 7.2807 
+Horizon 60mins: mae: 4.5228, mape: 13.1122, rmse: 9.1670 
+Epoch [5/200] (1875) train_loss: 2.2682, train_mae_loss: 2.2540, train_contra_loss: 1.4226, train_conpact_loss: 0.2139, val_loss: 3.1756, lr: 0.010000, 93.7s 
+Horizon overall: mae: 3.5407, mape: 9.7575, rmse: 7.2361 
+Horizon 15mins: mae: 2.9433, mape: 7.7890, rmse: 5.7750 
+Horizon 30mins: mae: 3.5193, mape: 9.7381, rmse: 7.1469 
+Horizon 60mins: mae: 4.4563, mape: 12.7175, rmse: 9.0492 
+Epoch [6/200] (2250) train_loss: 2.2354, train_mae_loss: 2.2213, train_contra_loss: 1.4081, train_conpact_loss: 0.3645, val_loss: 3.0918, lr: 0.010000, 95.8s 
+Horizon overall: mae: 3.4296, mape: 9.7038, rmse: 7.0377 
+Horizon 15mins: mae: 2.9002, mape: 7.6591, rmse: 5.6811 
+Horizon 30mins: mae: 3.4323, mape: 9.6583, rmse: 7.0132 
+Horizon 60mins: mae: 4.2151, mape: 12.7636, rmse: 8.6500 
+Epoch [7/200] (2625) train_loss: 2.2005, train_mae_loss: 2.1865, train_contra_loss: 1.4017, train_conpact_loss: 0.5747, val_loss: 3.2452, lr: 0.010000, 97.9s 
+Horizon overall: mae: 3.5898, mape: 11.0536, rmse: 7.2178 
+Horizon 15mins: mae: 2.9600, mape: 8.2478, rmse: 5.6590 
+Horizon 30mins: mae: 3.6021, mape: 11.0581, rmse: 7.1339 
+Horizon 60mins: mae: 4.4859, mape: 14.9495, rmse: 9.0221 
+Epoch [8/200] (3000) train_loss: 2.1563, train_mae_loss: 2.1423, train_contra_loss: 1.3994, train_conpact_loss: 0.8007, val_loss: 3.0254, lr: 0.010000, 94.2s 
+Horizon overall: mae: 3.3614, mape: 9.2576, rmse: 6.8649 
+Horizon 15mins: mae: 2.8409, mape: 7.3398, rmse: 5.5388 
+Horizon 30mins: mae: 3.3730, mape: 9.2971, rmse: 6.8543 
+Horizon 60mins: mae: 4.1213, mape: 11.9575, rmse: 8.4118 
+Epoch [9/200] (3375) train_loss: 2.1189, train_mae_loss: 2.1049, train_contra_loss: 1.3961, train_conpact_loss: 0.9592, val_loss: 3.1629, lr: 0.010000, 92.9s 
+Horizon overall: mae: 3.4597, mape: 10.5940, rmse: 6.8816 
+Horizon 15mins: mae: 2.8683, mape: 7.8641, rmse: 5.3884 
+Horizon 30mins: mae: 3.4775, mape: 10.6500, rmse: 6.8430 
+Horizon 60mins: mae: 4.2948, mape: 14.2865, rmse: 8.5257 
+Epoch [10/200] (3750) train_loss: 2.0997, train_mae_loss: 2.0858, train_contra_loss: 1.3915, train_conpact_loss: 1.0938, val_loss: 2.9368, lr: 0.010000, 92.5s 
+Horizon overall: mae: 3.2417, mape: 8.8345, rmse: 6.6743 
+Horizon 15mins: mae: 2.7842, mape: 7.2032, rmse: 5.4116 
+Horizon 30mins: mae: 3.2639, mape: 8.9803, rmse: 6.6793 
+Horizon 60mins: mae: 3.9122, mape: 11.0515, rmse: 8.1515 
+Epoch [11/200] (4125) train_loss: 2.0763, train_mae_loss: 2.0624, train_contra_loss: 1.3873, train_conpact_loss: 1.2031, val_loss: 2.9228, lr: 0.010000, 92.7s 
+Horizon overall: mae: 3.2169, mape: 8.8852, rmse: 6.7155 
+Horizon 15mins: mae: 2.7587, mape: 7.1332, rmse: 5.3761 
+Horizon 30mins: mae: 3.2372, mape: 8.9167, rmse: 6.6945 
+Horizon 60mins: mae: 3.8924, mape: 11.4264, rmse: 8.2771 
+Epoch [12/200] (4500) train_loss: 2.0645, train_mae_loss: 2.0507, train_contra_loss: 1.3849, train_conpact_loss: 1.2958, val_loss: 2.8863, lr: 0.010000, 93.3s 
+Horizon overall: mae: 3.1845, mape: 9.0378, rmse: 6.6588 
+Horizon 15mins: mae: 2.7401, mape: 7.2245, rmse: 5.3537 
+Horizon 30mins: mae: 3.2109, mape: 9.1250, rmse: 6.6633 
+Horizon 60mins: mae: 3.8310, mape: 11.6044, rmse: 8.1638 
+Epoch [13/200] (4875) train_loss: 2.0563, train_mae_loss: 2.0424, train_contra_loss: 1.3825, train_conpact_loss: 1.3587, val_loss: 2.9216, lr: 0.010000, 93.9s 
+Horizon overall: mae: 3.1901, mape: 9.1975, rmse: 6.6424 
+Horizon 15mins: mae: 2.7345, mape: 7.1569, rmse: 5.3515 
+Horizon 30mins: mae: 3.2091, mape: 9.1670, rmse: 6.6335 
+Horizon 60mins: mae: 3.8600, mape: 12.1926, rmse: 8.1647 
+Epoch [14/200] (5250) train_loss: 2.0422, train_mae_loss: 2.0284, train_contra_loss: 1.3800, train_conpact_loss: 1.4153, val_loss: 2.9371, lr: 0.010000, 90.7s 
+Horizon overall: mae: 3.2303, mape: 8.3900, rmse: 6.5376 
+Horizon 15mins: mae: 2.7340, mape: 6.9112, rmse: 5.2635 
+Horizon 30mins: mae: 3.2400, mape: 8.4710, rmse: 6.5204 
+Horizon 60mins: mae: 3.9589, mape: 10.4957, rmse: 8.0329 
+Epoch [15/200] (5625) train_loss: 2.0350, train_mae_loss: 2.0212, train_contra_loss: 1.3785, train_conpact_loss: 1.4679, val_loss: 2.9213, lr: 0.010000, 94.7s 
+Horizon overall: mae: 3.2108, mape: 8.4911, rmse: 6.4259 
+Horizon 15mins: mae: 2.7487, mape: 6.9157, rmse: 5.2622 
+Horizon 30mins: mae: 3.2427, mape: 8.5754, rmse: 6.4579 
+Horizon 60mins: mae: 3.8720, mape: 10.7070, rmse: 7.7704 
+Epoch [16/200] (6000) train_loss: 2.0291, train_mae_loss: 2.0154, train_contra_loss: 1.3774, train_conpact_loss: 1.5123, val_loss: 2.8405, lr: 0.010000, 95.4s 
+Horizon overall: mae: 3.1466, mape: 8.3800, rmse: 6.5840 
+Horizon 15mins: mae: 2.7061, mape: 6.9300, rmse: 5.2882 
+Horizon 30mins: mae: 3.1654, mape: 8.5084, rmse: 6.5698 
+Horizon 60mins: mae: 3.7977, mape: 10.4143, rmse: 8.1021 
+Epoch [17/200] (6375) train_loss: 2.0266, train_mae_loss: 2.0128, train_contra_loss: 1.3761, train_conpact_loss: 1.5617, val_loss: 2.8755, lr: 0.010000, 91.3s 
+Horizon overall: mae: 3.1560, mape: 8.9651, rmse: 6.5767 
+Horizon 15mins: mae: 2.7321, mape: 7.1515, rmse: 5.3417 
+Horizon 30mins: mae: 3.1928, mape: 9.0832, rmse: 6.6097 
+Horizon 60mins: mae: 3.7640, mape: 11.4605, rmse: 7.9915 
+Epoch [18/200] (6750) train_loss: 2.0191, train_mae_loss: 2.0053, train_contra_loss: 1.3752, train_conpact_loss: 1.5899, val_loss: 2.8635, lr: 0.010000, 96.0s 
+Horizon overall: mae: 3.1648, mape: 8.5995, rmse: 6.5955 
+Horizon 15mins: mae: 2.7363, mape: 7.0410, rmse: 5.3558 
+Horizon 30mins: mae: 3.1902, mape: 8.7095, rmse: 6.6044 
+Horizon 60mins: mae: 3.7995, mape: 10.8305, rmse: 8.0518 
+Epoch [19/200] (7125) train_loss: 2.0161, train_mae_loss: 2.0024, train_contra_loss: 1.3743, train_conpact_loss: 1.6290, val_loss: 2.9156, lr: 0.010000, 94.2s 
+Horizon overall: mae: 3.1926, mape: 9.0717, rmse: 6.6730 
+Horizon 15mins: mae: 2.7418, mape: 7.1901, rmse: 5.3678 
+Horizon 30mins: mae: 3.2291, mape: 9.1792, rmse: 6.6967 
+Horizon 60mins: mae: 3.8273, mape: 11.6276, rmse: 8.1462 
+Epoch [20/200] (7500) train_loss: 2.0123, train_mae_loss: 1.9986, train_contra_loss: 1.3732, train_conpact_loss: 1.6597, val_loss: 2.8373, lr: 0.010000, 93.9s 
+Horizon overall: mae: 3.1189, mape: 8.6748, rmse: 6.3950 
+Horizon 15mins: mae: 2.7018, mape: 7.1006, rmse: 5.2535 
+Horizon 30mins: mae: 3.1552, mape: 8.8484, rmse: 6.4432 
+Horizon 60mins: mae: 3.7165, mape: 10.8176, rmse: 7.7043 
+Epoch [21/200] (7875) train_loss: 2.0074, train_mae_loss: 1.9937, train_contra_loss: 1.3727, train_conpact_loss: 1.6828, val_loss: 2.9898, lr: 0.010000, 91.1s 
+Horizon overall: mae: 3.2846, mape: 9.8395, rmse: 6.9200 
+Horizon 15mins: mae: 2.7549, mape: 7.4078, rmse: 5.4094 
+Horizon 30mins: mae: 3.3017, mape: 9.8422, rmse: 6.8897 
+Horizon 60mins: mae: 4.0444, mape: 13.2559, rmse: 8.6096 
+Epoch [22/200] (8250) train_loss: 2.0052, train_mae_loss: 1.9915, train_contra_loss: 1.3721, train_conpact_loss: 1.7065, val_loss: 2.8899, lr: 0.010000, 94.7s 
+Horizon overall: mae: 3.1859, mape: 8.5944, rmse: 6.4182 
+Horizon 15mins: mae: 2.7262, mape: 6.9745, rmse: 5.2600 
+Horizon 30mins: mae: 3.2108, mape: 8.7067, rmse: 6.4502 
+Horizon 60mins: mae: 3.8518, mape: 10.8425, rmse: 7.7589 
+Epoch [23/200] (8625) train_loss: 2.0131, train_mae_loss: 1.9994, train_contra_loss: 1.3726, train_conpact_loss: 1.7108, val_loss: 2.9091, lr: 0.010000, 90.2s 
+Horizon overall: mae: 3.1961, mape: 9.5377, rmse: 6.7830 
+Horizon 15mins: mae: 2.7064, mape: 7.1512, rmse: 5.2902 
+Horizon 30mins: mae: 3.2145, mape: 9.4787, rmse: 6.7147 
+Horizon 60mins: mae: 3.8937, mape: 12.9179, rmse: 8.4828 
+Epoch [24/200] (9000) train_loss: 2.0049, train_mae_loss: 1.9912, train_contra_loss: 1.3712, train_conpact_loss: 1.7189, val_loss: 2.8605, lr: 0.010000, 89.4s 
+Horizon overall: mae: 3.1404, mape: 8.8156, rmse: 6.6076 
+Horizon 15mins: mae: 2.7098, mape: 7.0522, rmse: 5.3293 
+Horizon 30mins: mae: 3.1693, mape: 8.8529, rmse: 6.6224 
+Horizon 60mins: mae: 3.7587, mape: 11.3384, rmse: 8.0645 
+Epoch [25/200] (9375) train_loss: 2.0062, train_mae_loss: 1.9925, train_contra_loss: 1.3711, train_conpact_loss: 1.7463, val_loss: 2.8112, lr: 0.010000, 93.0s 
+Horizon overall: mae: 3.1011, mape: 8.5905, rmse: 6.4948 
+Horizon 15mins: mae: 2.6916, mape: 6.9489, rmse: 5.2546 
+Horizon 30mins: mae: 3.1305, mape: 8.6497, rmse: 6.5030 
+Horizon 60mins: mae: 3.6930, mape: 10.9432, rmse: 7.9251 
+Epoch [26/200] (9750) train_loss: 2.0059, train_mae_loss: 1.9922, train_contra_loss: 1.3707, train_conpact_loss: 1.7504, val_loss: 2.8110, lr: 0.010000, 94.1s 
+Horizon overall: mae: 3.0970, mape: 8.5123, rmse: 6.4778 
+Horizon 15mins: mae: 2.6949, mape: 6.9872, rmse: 5.2870 
+Horizon 30mins: mae: 3.1305, mape: 8.6323, rmse: 6.5094 
+Horizon 60mins: mae: 3.6720, mape: 10.6351, rmse: 7.8506 
+Epoch [27/200] (10125) train_loss: 2.0035, train_mae_loss: 1.9898, train_contra_loss: 1.3701, train_conpact_loss: 1.7638, val_loss: 2.8059, lr: 0.010000, 95.7s 
+Horizon overall: mae: 3.1027, mape: 8.1869, rmse: 6.4073 
+Horizon 15mins: mae: 2.7002, mape: 6.8421, rmse: 5.2597 
+Horizon 30mins: mae: 3.1369, mape: 8.2983, rmse: 6.4429 
+Horizon 60mins: mae: 3.6811, mape: 10.0957, rmse: 7.7311 
+Epoch [28/200] (10500) train_loss: 2.0410, train_mae_loss: 2.0273, train_contra_loss: 1.3731, train_conpact_loss: 1.7726, val_loss: 3.0221, lr: 0.010000, 93.9s 
+Horizon overall: mae: 3.2858, mape: 9.3742, rmse: 6.6391 
+Horizon 15mins: mae: 2.7503, mape: 7.1120, rmse: 5.2285 
+Horizon 30mins: mae: 3.2871, mape: 9.3548, rmse: 6.6028 
+Horizon 60mins: mae: 4.0497, mape: 12.4857, rmse: 8.1989 
+Epoch [29/200] (10875) train_loss: 2.0203, train_mae_loss: 2.0067, train_contra_loss: 1.3696, train_conpact_loss: 1.7182, val_loss: 2.8056, lr: 0.010000, 94.9s 
+Horizon overall: mae: 3.1016, mape: 8.4172, rmse: 6.5053 
+Horizon 15mins: mae: 2.7054, mape: 6.9093, rmse: 5.3058 
+Horizon 30mins: mae: 3.1372, mape: 8.5101, rmse: 6.5374 
+Horizon 60mins: mae: 3.6762, mape: 10.5704, rmse: 7.8924 
+Epoch [30/200] (11250) train_loss: 2.0256, train_mae_loss: 2.0119, train_contra_loss: 1.3702, train_conpact_loss: 1.7383, val_loss: 2.8198, lr: 0.010000, 94.0s 
+Horizon overall: mae: 3.1062, mape: 8.6873, rmse: 6.5447 
+Horizon 15mins: mae: 2.6878, mape: 7.0000, rmse: 5.2717 
+Horizon 30mins: mae: 3.1360, mape: 8.7493, rmse: 6.5544 
+Horizon 60mins: mae: 3.7046, mape: 11.0861, rmse: 7.9900 
+Epoch [31/200] (11625) train_loss: 2.0365, train_mae_loss: 2.0228, train_contra_loss: 1.3702, train_conpact_loss: 1.7280, val_loss: 2.8804, lr: 0.010000, 91.9s 
+Horizon overall: mae: 3.1503, mape: 8.8492, rmse: 6.6096 
+Horizon 15mins: mae: 2.7217, mape: 7.0700, rmse: 5.3542 
+Horizon 30mins: mae: 3.1800, mape: 8.9237, rmse: 6.6362 
+Horizon 60mins: mae: 3.7708, mape: 11.3597, rmse: 8.0462 
+Epoch [32/200] (12000) train_loss: 2.0500, train_mae_loss: 2.0363, train_contra_loss: 1.3703, train_conpact_loss: 1.7152, val_loss: 2.8426, lr: 0.010000, 92.4s 
+Horizon overall: mae: 3.1299, mape: 8.4187, rmse: 6.4672 
+Horizon 15mins: mae: 2.7303, mape: 6.8859, rmse: 5.2980 
+Horizon 30mins: mae: 3.1613, mape: 8.4624, rmse: 6.5066 
+Horizon 60mins: mae: 3.7122, mape: 10.6459, rmse: 7.8072 
+Epoch [33/200] (12375) train_loss: 2.0524, train_mae_loss: 2.0387, train_contra_loss: 1.3695, train_conpact_loss: 1.7281, val_loss: 2.9176, lr: 0.010000, 90.9s 
+Horizon overall: mae: 3.2093, mape: 9.2614, rmse: 6.5302 
+Horizon 15mins: mae: 2.7692, mape: 7.0308, rmse: 5.2434 
+Horizon 30mins: mae: 3.2097, mape: 9.0722, rmse: 6.4435 
+Horizon 60mins: mae: 3.8935, mape: 12.7392, rmse: 8.1468 
+Epoch [34/200] (12750) train_loss: 2.0775, train_mae_loss: 2.0638, train_contra_loss: 1.3700, train_conpact_loss: 1.7168, val_loss: 2.9126, lr: 0.010000, 90.8s 
+Horizon overall: mae: 3.1946, mape: 9.3622, rmse: 6.6103 
+Horizon 15mins: mae: 2.7198, mape: 7.0434, rmse: 5.2378 
+Horizon 30mins: mae: 3.1988, mape: 9.2074, rmse: 6.5339 
+Horizon 60mins: mae: 3.9096, mape: 12.8891, rmse: 8.2678 
+Epoch [35/200] (13125) train_loss: 2.0846, train_mae_loss: 2.0709, train_contra_loss: 1.3700, train_conpact_loss: 1.6962, val_loss: 3.0764, lr: 0.010000, 93.5s 
+Horizon overall: mae: 3.4047, mape: 8.6714, rmse: 7.1734 
+Horizon 15mins: mae: 2.7882, mape: 7.0005, rmse: 5.4674 
+Horizon 30mins: mae: 3.4002, mape: 8.7235, rmse: 7.0666 
+Horizon 60mins: mae: 4.2965, mape: 11.0347, rmse: 9.1117 
+Epoch [36/200] (13500) train_loss: 2.1170, train_mae_loss: 2.1033, train_contra_loss: 1.3707, train_conpact_loss: 1.6965, val_loss: 2.8808, lr: 0.010000, 95.9s 
+Horizon overall: mae: 3.1852, mape: 9.3298, rmse: 6.6615 
+Horizon 15mins: mae: 2.7563, mape: 7.4497, rmse: 5.3995 
+Horizon 30mins: mae: 3.2181, mape: 9.4233, rmse: 6.6828 
+Horizon 60mins: mae: 3.7992, mape: 11.9788, rmse: 8.1061 
+Epoch [37/200] (13875) train_loss: 2.1382, train_mae_loss: 2.1245, train_contra_loss: 1.3722, train_conpact_loss: 1.6809, val_loss: 2.8691, lr: 0.010000, 87.2s 
+Horizon overall: mae: 3.1697, mape: 8.4031, rmse: 6.6015 
+Horizon 15mins: mae: 2.7204, mape: 6.9626, rmse: 5.3264 
+Horizon 30mins: mae: 3.1894, mape: 8.4974, rmse: 6.5964 
+Horizon 60mins: mae: 3.8205, mape: 10.4083, rmse: 8.0881 
+Epoch [38/200] (14250) train_loss: 2.1555, train_mae_loss: 2.1418, train_contra_loss: 1.3720, train_conpact_loss: 1.6614, val_loss: 2.9207, lr: 0.010000, 92.2s 
+Horizon overall: mae: 3.2154, mape: 8.8170, rmse: 6.5802 
+Horizon 15mins: mae: 2.7468, mape: 7.0469, rmse: 5.2774 
+Horizon 30mins: mae: 3.2269, mape: 8.8249, rmse: 6.5597 
+Horizon 60mins: mae: 3.9126, mape: 11.4135, rmse: 8.0906 
+Epoch [39/200] (14625) train_loss: 2.1774, train_mae_loss: 2.1637, train_contra_loss: 1.3720, train_conpact_loss: 1.6433, val_loss: 2.8420, lr: 0.010000, 93.6s 
+Horizon overall: mae: 3.1190, mape: 8.8194, rmse: 6.5270 
+Horizon 15mins: mae: 2.6971, mape: 7.0600, rmse: 5.2600 
+Horizon 30mins: mae: 3.1491, mape: 8.9440, rmse: 6.5475 
+Horizon 60mins: mae: 3.7215, mape: 11.2014, rmse: 7.9588 
+Epoch [40/200] (15000) train_loss: 2.2136, train_mae_loss: 2.1998, train_contra_loss: 1.3738, train_conpact_loss: 1.6246, val_loss: 2.8224, lr: 0.010000, 95.0s 
+Horizon overall: mae: 3.1115, mape: 8.2303, rmse: 6.4464 
+Horizon 15mins: mae: 2.7237, mape: 6.8629, rmse: 5.2838 
+Horizon 30mins: mae: 3.1511, mape: 8.3199, rmse: 6.4826 
+Horizon 60mins: mae: 3.6607, mape: 10.2063, rmse: 7.7674 
+Epoch [41/200] (15375) train_loss: 2.2457, train_mae_loss: 2.2320, train_contra_loss: 1.3738, train_conpact_loss: 1.6100, val_loss: 2.8151, lr: 0.010000, 94.8s 
+Horizon overall: mae: 3.1107, mape: 8.3763, rmse: 6.5504 
+Horizon 15mins: mae: 2.6957, mape: 6.9550, rmse: 5.2831 
+Horizon 30mins: mae: 3.1267, mape: 8.4955, rmse: 6.5328 
+Horizon 60mins: mae: 3.7297, mape: 10.3725, rmse: 8.0426 
+Epoch [42/200] (15750) train_loss: 2.2974, train_mae_loss: 2.2837, train_contra_loss: 1.3743, train_conpact_loss: 1.5828, val_loss: 2.9496, lr: 0.010000, 95.6s 
+Horizon overall: mae: 3.2508, mape: 8.1444, rmse: 6.5508 
+Horizon 15mins: mae: 2.7455, mape: 6.8248, rmse: 5.1813 
+Horizon 30mins: mae: 3.2620, mape: 8.2095, rmse: 6.4887 
+Horizon 60mins: mae: 3.9799, mape: 10.0194, rmse: 8.1403 
+Epoch [43/200] (16125) train_loss: 2.3361, train_mae_loss: 2.3224, train_contra_loss: 1.3762, train_conpact_loss: 1.5662, val_loss: 2.8332, lr: 0.010000, 95.7s 
+Horizon overall: mae: 3.1561, mape: 8.0588, rmse: 6.5427 
+Horizon 15mins: mae: 2.7175, mape: 6.8042, rmse: 5.2680 
+Horizon 30mins: mae: 3.1731, mape: 8.1432, rmse: 6.5170 
+Horizon 60mins: mae: 3.7978, mape: 9.8649, rmse: 8.0345 
+Epoch [44/200] (16500) train_loss: 2.3779, train_mae_loss: 2.3641, train_contra_loss: 1.3770, train_conpact_loss: 1.5466, val_loss: 2.8097, lr: 0.010000, 95.5s 
+Horizon overall: mae: 3.1085, mape: 8.3379, rmse: 6.4508 
+Horizon 15mins: mae: 2.7136, mape: 6.8685, rmse: 5.2597 
+Horizon 30mins: mae: 3.1383, mape: 8.3698, rmse: 6.4616 
+Horizon 60mins: mae: 3.6686, mape: 10.4505, rmse: 7.8192 
+Epoch [45/200] (16875) train_loss: 2.4029, train_mae_loss: 2.3892, train_contra_loss: 1.3778, train_conpact_loss: 1.5192, val_loss: 2.8156, lr: 0.010000, 94.2s 
+Horizon overall: mae: 3.0794, mape: 8.7778, rmse: 6.4104 
+Horizon 15mins: mae: 2.7024, mape: 7.1234, rmse: 5.2452 
+Horizon 30mins: mae: 3.1076, mape: 8.8223, rmse: 6.4271 
+Horizon 60mins: mae: 3.6257, mape: 11.1429, rmse: 7.7633 
+Epoch [46/200] (17250) train_loss: 2.4524, train_mae_loss: 2.4386, train_contra_loss: 1.3802, train_conpact_loss: 1.4500, val_loss: 2.7946, lr: 0.010000, 96.8s 
+Horizon overall: mae: 3.0721, mape: 8.4517, rmse: 6.3265 
+Horizon 15mins: mae: 2.7030, mape: 7.0382, rmse: 5.1987 
+Horizon 30mins: mae: 3.1014, mape: 8.5616, rmse: 6.3434 
+Horizon 60mins: mae: 3.5989, mape: 10.4024, rmse: 7.6311 
+Epoch [47/200] (17625) train_loss: 2.4774, train_mae_loss: 2.4636, train_contra_loss: 1.3804, train_conpact_loss: 1.4307, val_loss: 2.7755, lr: 0.010000, 90.5s 
+Horizon overall: mae: 3.0794, mape: 8.1404, rmse: 6.3077 
+Horizon 15mins: mae: 2.6996, mape: 6.8156, rmse: 5.2002 
+Horizon 30mins: mae: 3.1010, mape: 8.2385, rmse: 6.3087 
+Horizon 60mins: mae: 3.6364, mape: 9.9926, rmse: 7.6280 
+Epoch [48/200] (18000) train_loss: 2.5388, train_mae_loss: 2.5250, train_contra_loss: 1.3840, train_conpact_loss: 1.4091, val_loss: 2.8137, lr: 0.010000, 89.4s 
+Horizon overall: mae: 3.1173, mape: 8.5223, rmse: 6.4081 
+Horizon 15mins: mae: 2.7516, mape: 7.0183, rmse: 5.3374 
+Horizon 30mins: mae: 3.1489, mape: 8.5326, rmse: 6.4451 
+Horizon 60mins: mae: 3.6478, mape: 10.7181, rmse: 7.6757 
+Epoch [49/200] (18375) train_loss: 2.5546, train_mae_loss: 2.5407, train_contra_loss: 1.3814, train_conpact_loss: 1.3857, val_loss: 2.8657, lr: 0.010000, 93.5s 
+Horizon overall: mae: 3.2024, mape: 8.6226, rmse: 6.4818 
+Horizon 15mins: mae: 2.7914, mape: 7.0504, rmse: 5.3458 
+Horizon 30mins: mae: 3.2320, mape: 8.6440, rmse: 6.5144 
+Horizon 60mins: mae: 3.7764, mape: 10.9029, rmse: 7.7913 
+Epoch [50/200] (18750) train_loss: 2.6132, train_mae_loss: 2.5993, train_contra_loss: 1.3864, train_conpact_loss: 1.3341, val_loss: 2.8284, lr: 0.001000, 95.0s 
+Horizon overall: mae: 3.1286, mape: 9.0079, rmse: 6.4189 
+Horizon 15mins: mae: 2.7506, mape: 7.2678, rmse: 5.3149 
+Horizon 30mins: mae: 3.1558, mape: 9.0330, rmse: 6.4406 
+Horizon 60mins: mae: 3.6784, mape: 11.5265, rmse: 7.7212 
+Epoch [51/200] (19125) train_loss: 2.4871, train_mae_loss: 2.4734, train_contra_loss: 1.3705, train_conpact_loss: 1.2833, val_loss: 2.6972, lr: 0.001000, 91.4s 
+Horizon overall: mae: 2.9823, mape: 8.0654, rmse: 6.0993 
+Horizon 15mins: mae: 2.6447, mape: 6.7653, rmse: 5.0815 
+Horizon 30mins: mae: 3.0197, mape: 8.1812, rmse: 6.1469 
+Horizon 60mins: mae: 3.4530, mape: 9.8452, rmse: 7.2626 
+Epoch [52/200] (19500) train_loss: 2.4686, train_mae_loss: 2.4549, train_contra_loss: 1.3679, train_conpact_loss: 1.2682, val_loss: 2.7028, lr: 0.001000, 94.5s 
+Horizon overall: mae: 2.9880, mape: 8.1318, rmse: 6.1314 
+Horizon 15mins: mae: 2.6447, mape: 6.7851, rmse: 5.0969 
+Horizon 30mins: mae: 3.0284, mape: 8.2575, rmse: 6.1834 
+Horizon 60mins: mae: 3.4610, mape: 9.9603, rmse: 7.3044 
+Epoch [53/200] (19875) train_loss: 2.4717, train_mae_loss: 2.4580, train_contra_loss: 1.3677, train_conpact_loss: 1.2681, val_loss: 2.7122, lr: 0.001000, 94.3s 
+Horizon overall: mae: 2.9886, mape: 8.1776, rmse: 6.1377 
+Horizon 15mins: mae: 2.6413, mape: 6.7899, rmse: 5.0886 
+Horizon 30mins: mae: 3.0261, mape: 8.2887, rmse: 6.1834 
+Horizon 60mins: mae: 3.4703, mape: 10.0821, rmse: 7.3289 
+Epoch [54/200] (20250) train_loss: 2.4820, train_mae_loss: 2.4683, train_contra_loss: 1.3676, train_conpact_loss: 1.2775, val_loss: 2.7269, lr: 0.001000, 95.3s 
+Horizon overall: mae: 2.9998, mape: 8.0679, rmse: 6.1611 
+Horizon 15mins: mae: 2.6495, mape: 6.7394, rmse: 5.1070 
+Horizon 30mins: mae: 3.0423, mape: 8.1966, rmse: 6.2134 
+Horizon 60mins: mae: 3.4805, mape: 9.8655, rmse: 7.3479 
+Epoch [55/200] (20625) train_loss: 2.4758, train_mae_loss: 2.4621, train_contra_loss: 1.3675, train_conpact_loss: 1.2866, val_loss: 2.7339, lr: 0.001000, 94.8s 
+Horizon overall: mae: 3.0128, mape: 8.4144, rmse: 6.2109 
+Horizon 15mins: mae: 2.6587, mape: 6.9150, rmse: 5.1314 
+Horizon 30mins: mae: 3.0557, mape: 8.5238, rmse: 6.2658 
+Horizon 60mins: mae: 3.5024, mape: 10.5121, rmse: 7.4311 
+Epoch [56/200] (21000) train_loss: 2.4800, train_mae_loss: 2.4663, train_contra_loss: 1.3680, train_conpact_loss: 1.2938, val_loss: 2.7330, lr: 0.001000, 94.1s 
+Horizon overall: mae: 3.0127, mape: 8.2340, rmse: 6.2295 
+Horizon 15mins: mae: 2.6563, mape: 6.8495, rmse: 5.1379 
+Horizon 30mins: mae: 3.0550, mape: 8.3700, rmse: 6.2855 
+Horizon 60mins: mae: 3.5028, mape: 10.1196, rmse: 7.4530 
+Epoch [57/200] (21375) train_loss: 2.4811, train_mae_loss: 2.4674, train_contra_loss: 1.3676, train_conpact_loss: 1.3021, val_loss: 2.7338, lr: 0.001000, 88.4s 
+Horizon overall: mae: 3.0148, mape: 8.3125, rmse: 6.2246 
+Horizon 15mins: mae: 2.6592, mape: 6.8396, rmse: 5.1492 
+Horizon 30mins: mae: 3.0540, mape: 8.4153, rmse: 6.2749 
+Horizon 60mins: mae: 3.5069, mape: 10.3509, rmse: 7.4448 
+Epoch [58/200] (21750) train_loss: 2.4838, train_mae_loss: 2.4701, train_contra_loss: 1.3675, train_conpact_loss: 1.3048, val_loss: 2.7483, lr: 0.001000, 88.9s 
+Horizon overall: mae: 3.0256, mape: 8.1669, rmse: 6.2523 
+Horizon 15mins: mae: 2.6626, mape: 6.8106, rmse: 5.1518 
+Horizon 30mins: mae: 3.0640, mape: 8.2996, rmse: 6.2988 
+Horizon 60mins: mae: 3.5246, mape: 10.0067, rmse: 7.4859 
+Epoch [59/200] (22125) train_loss: 2.4768, train_mae_loss: 2.4632, train_contra_loss: 1.3681, train_conpact_loss: 1.3092, val_loss: 2.7481, lr: 0.001000, 94.1s 
+Horizon overall: mae: 3.0227, mape: 8.3323, rmse: 6.2517 
+Horizon 15mins: mae: 2.6626, mape: 6.8459, rmse: 5.1585 
+Horizon 30mins: mae: 3.0605, mape: 8.4232, rmse: 6.2915 
+Horizon 60mins: mae: 3.5277, mape: 10.4132, rmse: 7.5053 
+Epoch [60/200] (22500) train_loss: 2.4737, train_mae_loss: 2.4600, train_contra_loss: 1.3677, train_conpact_loss: 1.3193, val_loss: 2.7684, lr: 0.001000, 94.2s 
+Horizon overall: mae: 3.0415, mape: 8.3695, rmse: 6.2817 
+Horizon 15mins: mae: 2.6710, mape: 6.9106, rmse: 5.1651 
+Horizon 30mins: mae: 3.0811, mape: 8.4781, rmse: 6.3266 
+Horizon 60mins: mae: 3.5529, mape: 10.3995, rmse: 7.5410 
+Epoch [61/200] (22875) train_loss: 2.4700, train_mae_loss: 2.4563, train_contra_loss: 1.3676, train_conpact_loss: 1.3280, val_loss: 2.7626, lr: 0.001000, 87.7s 
+Horizon overall: mae: 3.0462, mape: 8.3819, rmse: 6.3217 
+Horizon 15mins: mae: 2.6740, mape: 6.8608, rmse: 5.1780 
+Horizon 30mins: mae: 3.0862, mape: 8.4807, rmse: 6.3631 
+Horizon 60mins: mae: 3.5631, mape: 10.4868, rmse: 7.6107 
+Epoch [62/200] (23250) train_loss: 2.4663, train_mae_loss: 2.4526, train_contra_loss: 1.3679, train_conpact_loss: 1.3227, val_loss: 2.7676, lr: 0.001000, 95.3s 
+Horizon overall: mae: 3.0559, mape: 8.3627, rmse: 6.3113 
+Horizon 15mins: mae: 2.6779, mape: 6.8837, rmse: 5.1752 
+Horizon 30mins: mae: 3.0974, mape: 8.4758, rmse: 6.3551 
+Horizon 60mins: mae: 3.5700, mape: 10.3951, rmse: 7.5792 
+Epoch [63/200] (23625) train_loss: 2.4575, train_mae_loss: 2.4438, train_contra_loss: 1.3680, train_conpact_loss: 1.3281, val_loss: 2.7841, lr: 0.001000, 93.9s 
+Horizon overall: mae: 3.0626, mape: 8.0943, rmse: 6.3433 
+Horizon 15mins: mae: 2.6784, mape: 6.7901, rmse: 5.1926 
+Horizon 30mins: mae: 3.0992, mape: 8.2232, rmse: 6.3794 
+Horizon 60mins: mae: 3.5918, mape: 9.8836, rmse: 7.6354 
+Epoch [64/200] (24000) train_loss: 2.4547, train_mae_loss: 2.4410, train_contra_loss: 1.3680, train_conpact_loss: 1.3319, val_loss: 2.7687, lr: 0.001000, 90.3s 
+Horizon overall: mae: 3.0540, mape: 8.3052, rmse: 6.3208 
+Horizon 15mins: mae: 2.6767, mape: 6.8927, rmse: 5.1857 
+Horizon 30mins: mae: 3.0916, mape: 8.4296, rmse: 6.3585 
+Horizon 60mins: mae: 3.5735, mape: 10.2387, rmse: 7.5989 
+Epoch [65/200] (24375) train_loss: 2.4501, train_mae_loss: 2.4364, train_contra_loss: 1.3683, train_conpact_loss: 1.3343, val_loss: 2.7630, lr: 0.001000, 91.1s 
+Horizon overall: mae: 3.0536, mape: 8.3723, rmse: 6.3240 
+Horizon 15mins: mae: 2.6839, mape: 6.9235, rmse: 5.2057 
+Horizon 30mins: mae: 3.0957, mape: 8.5061, rmse: 6.3814 
+Horizon 60mins: mae: 3.5614, mape: 10.3605, rmse: 7.5762 
+Epoch [66/200] (24750) train_loss: 2.4453, train_mae_loss: 2.4316, train_contra_loss: 1.3682, train_conpact_loss: 1.3402, val_loss: 2.7908, lr: 0.001000, 94.6s 
+Horizon overall: mae: 3.0643, mape: 8.4444, rmse: 6.3402 
+Horizon 15mins: mae: 2.6846, mape: 6.9547, rmse: 5.1982 
+Horizon 30mins: mae: 3.1039, mape: 8.5725, rmse: 6.3879 
+Horizon 60mins: mae: 3.5862, mape: 10.4885, rmse: 7.6158 
+Epoch [67/200] (25125) train_loss: 2.4404, train_mae_loss: 2.4267, train_contra_loss: 1.3684, train_conpact_loss: 1.3372, val_loss: 2.7929, lr: 0.001000, 94.4s 
+Horizon overall: mae: 3.0774, mape: 8.3623, rmse: 6.3930 
+Horizon 15mins: mae: 2.6907, mape: 6.8811, rmse: 5.2273 
+Horizon 30mins: mae: 3.1162, mape: 8.4632, rmse: 6.4313 
+Horizon 60mins: mae: 3.6089, mape: 10.4306, rmse: 7.6972 
+Epoch [68/200] (25500) train_loss: 2.4330, train_mae_loss: 2.4193, train_contra_loss: 1.3682, train_conpact_loss: 1.3448, val_loss: 2.7855, lr: 0.001000, 94.5s 
+Horizon overall: mae: 3.0837, mape: 8.3636, rmse: 6.3912 
+Horizon 15mins: mae: 2.6933, mape: 6.9121, rmse: 5.2208 
+Horizon 30mins: mae: 3.1271, mape: 8.4892, rmse: 6.4409 
+Horizon 60mins: mae: 3.6133, mape: 10.3486, rmse: 7.6866 
+Epoch [69/200] (25875) train_loss: 2.4301, train_mae_loss: 2.4164, train_contra_loss: 1.3683, train_conpact_loss: 1.3532, val_loss: 2.7844, lr: 0.001000, 94.2s 
+Horizon overall: mae: 3.0659, mape: 8.3175, rmse: 6.3656 
+Horizon 15mins: mae: 2.6854, mape: 6.9152, rmse: 5.2038 
+Horizon 30mins: mae: 3.1077, mape: 8.4472, rmse: 6.4184 
+Horizon 60mins: mae: 3.5853, mape: 10.2506, rmse: 7.6488 
+Epoch [70/200] (26250) train_loss: 2.4224, train_mae_loss: 2.4088, train_contra_loss: 1.3687, train_conpact_loss: 1.3513, val_loss: 2.7985, lr: 0.001000, 93.8s 
+Horizon overall: mae: 3.0805, mape: 8.5120, rmse: 6.4002 
+Horizon 15mins: mae: 2.6967, mape: 6.9776, rmse: 5.2219 
+Horizon 30mins: mae: 3.1232, mape: 8.6356, rmse: 6.4488 
+Horizon 60mins: mae: 3.6047, mape: 10.6147, rmse: 7.7045 
+Epoch [71/200] (26625) train_loss: 2.4161, train_mae_loss: 2.4024, train_contra_loss: 1.3684, train_conpact_loss: 1.3512, val_loss: 2.8033, lr: 0.001000, 92.5s 
+Horizon overall: mae: 3.0851, mape: 8.4458, rmse: 6.4177 
+Horizon 15mins: mae: 2.6914, mape: 6.9470, rmse: 5.2276 
+Horizon 30mins: mae: 3.1245, mape: 8.5508, rmse: 6.4605 
+Horizon 60mins: mae: 3.6246, mape: 10.5152, rmse: 7.7374 
+Early stopping at epoch: 70 
+===================================Best model performance=================================== 
+Horizon overall: mae: 2.9823, mape: 8.0654, rmse: 6.0993 
+Horizon 15mins: mae: 2.6447, mape: 6.7653, rmse: 5.0815 
+Horizon 30mins: mae: 3.0197, mape: 8.1812, rmse: 6.1469 
+Horizon 60mins: mae: 3.4530, mape: 9.8452, rmse: 7.2626 
+METRLA training and testing ended Mon Dec 18 14:53:27 2023
