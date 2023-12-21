@@ -1,0 +1,55 @@
+dataset: METRLA
+trainval_ratio: 0.8
+val_ratio: 0.125
+num_nodes: 207
+seq_len: 12
+horizon: 12
+input_dim: 1
+output_dim: 1
+embed_dim: 10
+max_diffusion_step: 3
+rnn_layers: 1
+rnn_units: 128
+mem_num: 20
+mem_dim: 64
+loss: mask_mae_loss
+epochs: 200
+patience: 20
+batch_size: 64
+lr: 0.01
+steps: [50, 100]
+lr_decay_ratio: 0.1
+epsilon: 0.001
+max_grad_norm: 5
+use_curriculum_learning: True
+adj_type: symadj
+cl_decay_steps: 2000
+gpu: 0
+seed: 100
+temp: 1.0
+lamb: 0.1
+lamb1: 1.0
+contra_loss: infonce
+compact_loss: mse
+ 
+METRLA training and testing started Thu Dec 21 16:54:59 2023
+train xs.shape, ys.shape (23974, 12, 207, 3) (23974, 12, 207, 3)
+val xs.shape, ys.shape (3425, 12, 207, 3) (3425, 12, 207, 3)
+test xs.shape, ys.shape (6850, 12, 207, 3) (6850, 12, 207, 3)
+Trainable parameter list: 
+In total: 496395 trainable parameters. 
+Epoch [1/200] (375) train_loss: 2.6223, train_mae_loss: 2.5994, train_contra_loss: 0.1330, train_compact_loss: 0.0096, val_loss: 3.7302, lr: 0.010000, 186.0s 
+Horizon overall: mae: 4.1554, mape: 11.6961, rmse: 8.2478 
+Horizon 15mins: mae: 3.2199, mape: 8.5876, rmse: 6.4463 
+Horizon 30mins: mae: 4.0640, mape: 11.3820, rmse: 8.1282 
+Horizon 60mins: mae: 5.6011, mape: 16.5308, rmse: 10.4071 
+Epoch [2/200] (750) train_loss: 2.3826, train_mae_loss: 2.3778, train_contra_loss: 0.0084, train_compact_loss: 0.0039, val_loss: 3.4606, lr: 0.010000, 222.2s 
+Horizon overall: mae: 3.8826, mape: 10.6735, rmse: 7.8967 
+Horizon 15mins: mae: 3.1402, mape: 8.1309, rmse: 6.3177 
+Horizon 30mins: mae: 3.8609, mape: 10.5239, rmse: 7.8375 
+Horizon 60mins: mae: 4.9904, mape: 14.5435, rmse: 9.7976 
+Epoch [3/200] (1125) train_loss: 2.3365, train_mae_loss: 2.3328, train_contra_loss: 0.0057, train_compact_loss: 0.0031, val_loss: 3.4005, lr: 0.010000, 149.6s 
+Horizon overall: mae: 3.7952, mape: 10.7804, rmse: 7.5857 
+Horizon 15mins: mae: 3.0820, mape: 8.2842, rmse: 5.9987 
+Horizon 30mins: mae: 3.7684, mape: 10.6721, rmse: 7.4904 
+Horizon 60mins: mae: 4.8768, mape: 14.6087, rmse: 9.5030 
