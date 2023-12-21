@@ -41,6 +41,9 @@ class ContrastiveLoss():
             pos_sum = torch.sum(score_matrix * mask, dim=-1)
             ratio = pos_sum / torch.sum(score_matrix, dim=-1)
             u_loss = torch.mean(-torch.log(ratio))
+            
+            # triplet loss
+            # a(p_1, p_2, 0.2) + a(p_2, p_3, 0.2) + u_loss
             return u_loss  
 
 def print_model(model):
@@ -217,7 +220,7 @@ parser.add_argument('--seed', type=int, default=100, help='random seed.')
 # TODO: support contra learning
 parser.add_argument('--temp', type=float, default=1.0, help='temperature parameter')
 parser.add_argument('--lamb', type=float, default=0.1, help='loss lambda') 
-parser.add_argument('--lamb1', type=float, default=1.0, help='compact loss lambda') 
+parser.add_argument('--lamb1', type=float, default=0.0, help='compact loss lambda') 
 parser.add_argument('--contra_loss', type=str, choices=['triplet', 'infonce'], default='infonce', help='whether to triplet or infonce contra loss')
 parser.add_argument('--compact_loss', type=str, choices=['mse', 'rmse', 'mae'], default='mse', help='whether to triplet or infonce contra loss')
 args = parser.parse_args()

@@ -147,7 +147,7 @@ class MDGCRNAdjHi(nn.Module):
         self.encoder = ADCRNN_Encoder(self.num_nodes, self.input_dim, self.rnn_units, self.cheb_k, self.rnn_layers)
         
         # deocoder
-        self.decoder_dim = 2*self.rnn_units + 2*self.mem_dim
+        self.decoder_dim = self.rnn_units + self.mem_dim
         self.decoder = ADCRNN_Decoder(self.num_nodes, self.output_dim + self.ycov_dim, self.decoder_dim, self.cheb_k, self.rnn_layers)
 
         # output
@@ -155,7 +155,7 @@ class MDGCRNAdjHi(nn.Module):
         
         # graph
         self.adj_mx = adj_mx
-        self.hypernet = nn.Sequential(nn.Linear(self.decoder_dim, self.embed_dim, bias=True))
+        self.hypernet = nn.Sequential(nn.Linear(self.decoder_dim*2, self.embed_dim, bias=True))
         
     def compute_sampling_threshold(self, batches_seen):
         return self.cl_decay_steps / (self.cl_decay_steps + np.exp(batches_seen / self.cl_decay_steps))
@@ -204,13 +204,14 @@ class MDGCRNAdjHi(nn.Module):
         neg = torch.cat([neg, neg_his], dim=0)
         mask = torch.cat([mask, mask_his], dim=0) if mask is not None else None
         
+        h_de = torch.cat([h_t, h_att], dim=-1)
         h_aug = torch.cat([h_t, h_att, h_his_t, h_his_att], dim=-1) # B, N, D
         
         node_embeddings = self.hypernet(h_aug) # B, N, e
         support = F.softmax(F.relu(torch.einsum('bnc,bmc->bnm', node_embeddings, node_embeddings)), dim=-1) 
         supports_de = [support]
         
-        ht_list = [h_aug]*self.rnn_layers
+        ht_list = [h_de]*self.rnn_layers
         go = torch.zeros((x.shape[0], self.num_nodes, self.output_dim), device=x.device)
         out = []
         for t in range(self.horizon):

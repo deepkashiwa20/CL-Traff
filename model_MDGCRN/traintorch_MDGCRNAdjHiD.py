@@ -14,7 +14,6 @@ import logging
 from utils import StandardScaler, masked_mae_loss, masked_mape_loss, masked_mse_loss, masked_rmse_loss
 from utils import load_adj
 from metrics import RMSE, MAE, MSE
-from audtorch.metrics.functional import pearsonr
 from MDGCRNAdjHiD import MDGCRNAdjHiD
 
 class ContrastiveLoss():
@@ -150,7 +149,8 @@ def traintest_model():
             else:
                 pass
             loss1 = compact_loss(query, pos.detach())
-            detect_loss = MSE(pearsonr(real_dis, latent_dis), torch.ones_like(real_dis).to(device))
+            detect_loss = MAE(real_dis * args.scale, latent_dis) #(x1, x2), (x3, x4) x_1/(x_1+x_2)
+            # detect_loss = -torch.log(latent_dis / (real_dis + 1))
             loss = mae_loss + args.lamb * u_loss + args.lamb1 * loss1 + args.lamb2 * detect_loss
             losses.append(loss.item())
             mae_losses.append(mae_loss.item())
@@ -221,6 +221,7 @@ parser.add_argument('--gpu', type=int, default=0, help='which gpu to use')
 parser.add_argument('--seed', type=int, default=100, help='random seed.')
 # TODO: support contra learning
 parser.add_argument('--temp', type=float, default=1.0, help='temperature parameter')
+parser.add_argument('--scale', type=float, default=0.1, help='scale parameter')
 parser.add_argument('--lamb', type=float, default=0.1, help='loss lambda') 
 parser.add_argument('--lamb1', type=float, default=1.0, help='compact loss lambda') 
 parser.add_argument('--lamb2', type=float, default=1.0, help='anomaly detection loss lambda') 
