@@ -14,7 +14,7 @@ import logging
 from utils import StandardScaler, masked_mae_loss, masked_mape_loss, masked_mse_loss, masked_rmse_loss
 from utils import load_adj
 from metrics import RMSE, MAE, MSE
-from MDGCRNAdjHiD import MDGCRNAdjHiD
+from model_MDGCRN.MDGCRNAdjHiD1 import MDGCRNAdjHiD1
 
 class ContrastiveLoss():
     def __init__(self, contra_loss='triplet', mask=None, temp=0.1, margin=1.0):
@@ -55,10 +55,10 @@ def print_model(model):
 def get_model():
     adj_mx = load_adj(adj_mx_path, args.adj_type)
     adjs = [torch.tensor(i).to(device) for i in adj_mx]            
-    model = MDGCRNAdjHiD(num_nodes=args.num_nodes, input_dim=args.input_dim, output_dim=args.output_dim, horizon=args.horizon, 
+    model = MDGCRNAdjHiD1(num_nodes=args.num_nodes, input_dim=args.input_dim, output_dim=args.output_dim, horizon=args.horizon, 
                  rnn_units=args.rnn_units, rnn_layers=args.rnn_layers, cheb_k = args.max_diffusion_step, mem_num=args.mem_num, 
-                 mem_dim=args.mem_dim, embed_dim=args.embed_dim, adj_mx = adjs, cl_decay_steps=args.cl_decay_steps, use_curriculum_learning=args.use_curriculum_learning, 
-                 contra_loss=args.contra_loss, diff_max=diff_max, diff_min=diff_min, schema=args.schema, device=device).to(device)
+                 mem_dim=args.mem_dim, embed_dim=args.embed_dim, adj_mx = adjs, cl_decay_steps=args.cl_decay_steps, 
+                 use_curriculum_learning=args.use_curriculum_learning, contra_loss=args.contra_loss, device=device).to(device)
     return model
 
 def prepare_x_y(x, y):
@@ -149,7 +149,8 @@ def traintest_model():
             else:
                 pass
             loss1 = compact_loss(query, pos.detach())
-            detect_loss = MAE(real_dis, latent_dis) 
+            detect_loss = MAE(real_dis * args.scale, latent_dis) #(x1, x2), (x3, x4) x_1/(x_1+x_2)
+            # detect_loss = -torch.log(latent_dis / (real_dis + 1))
             loss = mae_loss + args.lamb * u_loss + args.lamb1 * loss1 + args.lamb2 * detect_loss
             losses.append(loss.item())
             mae_losses.append(mae_loss.item())
@@ -220,10 +221,10 @@ parser.add_argument('--gpu', type=int, default=0, help='which gpu to use')
 parser.add_argument('--seed', type=int, default=100, help='random seed.')
 # TODO: support contra learning
 parser.add_argument('--temp', type=float, default=1.0, help='temperature parameter')
-parser.add_argument('--lamb', type=float, default=0.1, help='contra loss lambda') 
+parser.add_argument('--scale', type=float, default=0.1, help='scale parameter')
+parser.add_argument('--lamb', type=float, default=0.1, help='loss lambda') 
 parser.add_argument('--lamb1', type=float, default=0.0, help='compact loss lambda') 
 parser.add_argument('--lamb2', type=float, default=1.0, help='anomaly detection loss lambda') 
-parser.add_argument('--schema', type=int, default=3, choices=[1, 2, 3], help='which schema to implement latent distance')
 parser.add_argument('--contra_loss', type=str, choices=['triplet', 'infonce'], default='infonce', help='whether to triplet or infonce contra loss')
 parser.add_argument('--compact_loss', type=str, choices=['mse', 'rmse', 'mae'], default='mse', help='whether to triplet or infonce contra loss')
 args = parser.parse_args()
@@ -239,7 +240,7 @@ elif args.dataset == 'PEMSBAY':
 else:
     pass # including more datasets in the future    
 
-model_name = 'MDGCRNAdjHiD'
+model_name = 'MDGCRNAdjHiD1'
 timestring = time.strftime('%Y%m%d%H%M%S', time.localtime())
 path = f'../save/{args.dataset}_{model_name}_{timestring}'
 logging_path = f'{path}/{model_name}_{timestring}_logging.txt'
@@ -319,11 +320,7 @@ for category in ['train', 'val', 'test']:
 scaler = StandardScaler(mean=data['x_train'][..., 0].mean(), std=data['x_train'][..., 0].std())
 for category in ['train', 'val', 'test']:
     data['x_' + category][..., 0] = scaler.transform(data['x_' + category][..., 0])
-
-#* 既然max都相同, min干脆设置为0, 因为abs的最小值必定>=0, 这样同样能合理解释, 也能归一化到[0, 1],只不过最小值为0.07左右, 与0接近
-diff_max = np.max(np.abs(scaler.transform(data['x_train'][..., 0]) - scaler.transform(data['x_train'][..., -1])))  # 3.734067777528973 for x_train, x_val, and x_test
-# diff_min = np.min(np.abs(scaler.transform(data['x_train'][..., 0]) - scaler.transform(data['x_train'][..., -1])))  # x_train: 0.34289610787771085, x_val: 0.37793285841246993, x_test: 0.2914432740946036
-diff_min = 0.
+    # data['y_' + category][..., 0] = scaler.transform(data['y_' + category][..., 0])
 
 data['train_loader'] = torch.utils.data.DataLoader(
     torch.utils.data.TensorDataset(torch.FloatTensor(data['x_train']), torch.FloatTensor(data['y_train'])),

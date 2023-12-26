@@ -118,11 +118,11 @@ class ADCRNN_Decoder(nn.Module):
         return current_inputs, output_hidden
 
 
-class MDGCRNAdjHiD(nn.Module):
+class MDGCRNAdjHiD1(nn.Module):
     def __init__(self, num_nodes, input_dim, output_dim, horizon, rnn_units, rnn_layers=1, cheb_k=3,
                  ycov_dim=1, mem_num=20, mem_dim=64, embed_dim=10, adj_mx=None, cl_decay_steps=2000, 
-                 use_curriculum_learning=True, contra_loss='triplet', diff_max=3.74, diff_min=0, schema=1, device="cpu"):
-        super(MDGCRNAdjHiD, self).__init__()
+                 use_curriculum_learning=True, contra_loss='triplet', device="cpu"):
+        super(MDGCRNAdjHiD1, self).__init__()
         self.num_nodes = num_nodes
         self.input_dim = input_dim
         self.rnn_units = rnn_units
@@ -137,9 +137,6 @@ class MDGCRNAdjHiD(nn.Module):
         # TODO: support contrastive learning
         self.contra_loss = contra_loss
         self.device = device
-        self.diff_min = diff_min
-        self.diff_max = diff_max
-        self.schema = schema
         
         # memory
         self.mem_num = mem_num
@@ -159,15 +156,6 @@ class MDGCRNAdjHiD(nn.Module):
         # graph
         self.adj_mx = adj_mx
         self.hypernet = nn.Sequential(nn.Linear(self.decoder_dim, self.embed_dim, bias=True))
-        
-        # latent distance
-        if self.schema == 1:
-            # self.hypernet_lat = nn.Sequential(nn.Linear(self.mem_dim, 1, bias=True))  # for add / subtract
-            self.hypernet_lat = nn.Sequential(nn.Linear(2*self.mem_dim, 1, bias=True))  # for concat
-        if self.schema == 3:
-            self.hypernet_lat = nn.Sequential(nn.Linear(self.mem_dim, self.mem_dim, bias=True))  # mlp projection
-        self.act_dict = {'relu': nn.ReLU(), 'lrelu': nn.LeakyReLU(), 'sigmoid': nn.Sigmoid()}
-        self.act_fn = 'sigmoid'  # 'relu' 'lrelu' 'sigmoid'
         
     def compute_sampling_threshold(self, batches_seen):
         return self.cl_decay_steps / (self.cl_decay_steps + np.exp(batches_seen / self.cl_decay_steps))
@@ -196,36 +184,24 @@ class MDGCRNAdjHiD(nn.Module):
             mask = None
         else:
             pass
-        return value, query, pos, neg, mask
+        return value, query, pos, neg, mask, att_score, ind
             
-    def calculate_cosine(self, pos, pos_his):
-        if self.schema == 3:
-            pos, pos_his = self.hypernet_lat(pos), self.hypernet_lat(pos_his)  # B, N, d
-        score = F.cosine_similarity(pos, pos_his, dim=-1)  # B, N
-        
-        return (1 - score) / 2  # normalized [0, 1]
-    
     def forward(self, x, x_cov, x_his, y_cov, labels=None, batches_seen=None):
         supports_en = self.adj_mx
         init_state = self.encoder.init_hidden(x.shape[0])
         h_en, state_en = self.encoder(x, init_state, supports_en) # B, T, N, hidden
         h_t = h_en[:, -1, :, :] # B, N, hidden (last state)    
-        h_att, query, pos, neg, mask = self.query_memory(h_t)    
+        h_att, query, pos, neg, mask, h_att_score, h_ind = self.query_memory(h_t)    
         
         # TODO: for x_his
         h_his_en, state_his_en = self.encoder(x_his, init_state, supports_en) # B, T, N, hidden
         h_his_t = h_his_en[:, -1, :, :] # B, N, hidden (last state)      
-        h_his_att, query_his, pos_his, neg_his, mask_his = self.query_memory(h_his_t)
+        h_his_att, query_his, pos_his, neg_his, mask_his, h_his_att_score, h_his_ind = self.query_memory(h_his_t)
         
         # TODO: detection loss
-        # normalization [0, 1]
-        real_dis = (torch.clamp(torch.abs(x-x_his)[:, -1, :, :].squeeze(-1), min=self.diff_min, max=self.diff_max) - self.diff_min) / (self.diff_max - self.diff_min) 
-        if self.schema == 1:
-            # latent_dis = self.hypernet_lat(pos - pos_his).squeeze(-1)  # for add / subtract
-            latent_dis = self.hypernet_lat(torch.concat([pos, pos_his], dim=-1)).squeeze(-1)  # for concat
-        else:
-            latent_dis = self.calculate_cosine(pos, pos_his)
-        latent_dis = self.act_dict.get(self.act_fn)(latent_dis)
+        real_dis = torch.abs(x-x_his)[:, -1, :, :].squeeze(-1)
+        his_anchor = h_his_ind[:, :, [0]]
+        latent_dis = h_att_score.gather(-1, his_anchor).squeeze(-1)
         
         h_aug = torch.cat([h_t, h_att], dim=-1) # B, N, D
         

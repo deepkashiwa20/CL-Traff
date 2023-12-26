@@ -1,6 +1,17 @@
 # CL-Traff
 An implementation of CL-Traff under GCRN backbone.
 
+#### Latest Release
+* cd model_MDGCRN
+* python traintorch_MDGCRNAdjHiD.py --gpu=0 --lamb xxx --lamb2 xxx --schema xxx
+* 如果不使用对比学习, 设置--lamb 0, 即只使用MAE loss + detection loss, 有3种detection loss实现方式:
+* python traintorch_MDGCRNAdjHiD.py --gpu=0 --lamb2 1.0 --schema 1 (方式1:这个hypernet的2个输入可以相加/相减/拼接，然后根据值域范围确定一个激活函数sigmoid确保在[0, 1])
+* python traintorch_MDGCRNAdjHiD.py --gpu=0 --lamb2 1.0 --schema 2 (方式2: 计算2个anchor的(1 - cosine(x1, x2) ) / 2，[0, 1])
+* python traintorch_MDGCRNAdjHiD.py --gpu=0 --lamb2 1.0 --schema 3 (方式3: 计算2个anchor的(1 - cosine(mlp(x1), mlp(x2)) ) / 2，[0, 1])
+* 如果使用对比学习，设置--lamb 0.1, 即使用MAE loss + detection loss + contra loss: 有2种contra loss以及3种schema, 总共6种实现方式:
+* python traintorch_MDGCRNAdjHiD.py --gpu=0 --lamb 0.1 --lamb2 1.0 --contra_loss infonce --schema xxx
+* python traintorch_MDGCRNAdjHiD.py --gpu=0 --lamb 0.1 --lamb2 1.0 --contra_loss triplet --schema xxx
+
 #### Updates (2023/10/20)
 * git pull
 * run the updated METRLA/preprocess_mean_nonullval_timeinday.ipynb

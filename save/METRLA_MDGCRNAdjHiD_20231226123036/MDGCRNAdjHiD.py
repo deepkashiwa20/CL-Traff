@@ -162,8 +162,8 @@ class MDGCRNAdjHiD(nn.Module):
         
         # latent distance
         if self.schema == 1:
-            # self.hypernet_lat = nn.Sequential(nn.Linear(self.mem_dim, 1, bias=True))  # for add / subtract
-            self.hypernet_lat = nn.Sequential(nn.Linear(2*self.mem_dim, 1, bias=True))  # for concat
+            self.hypernet_lat = nn.Sequential(nn.Linear(self.mem_dim, 1, bias=True))  # for add / subtract
+            # self.hypernet_lat = nn.Sequential(nn.Linear(2*self.mem_dim, 1, bias=True))  # for concat
         if self.schema == 3:
             self.hypernet_lat = nn.Sequential(nn.Linear(self.mem_dim, self.mem_dim, bias=True))  # mlp projection
         self.act_dict = {'relu': nn.ReLU(), 'lrelu': nn.LeakyReLU(), 'sigmoid': nn.Sigmoid()}
@@ -221,8 +221,8 @@ class MDGCRNAdjHiD(nn.Module):
         # normalization [0, 1]
         real_dis = (torch.clamp(torch.abs(x-x_his)[:, -1, :, :].squeeze(-1), min=self.diff_min, max=self.diff_max) - self.diff_min) / (self.diff_max - self.diff_min) 
         if self.schema == 1:
-            # latent_dis = self.hypernet_lat(pos - pos_his).squeeze(-1)  # for add / subtract
-            latent_dis = self.hypernet_lat(torch.concat([pos, pos_his], dim=-1)).squeeze(-1)  # for concat
+            latent_dis = self.hypernet_lat(pos - pos_his).squeeze(-1)  # for add / subtract
+            # latent_dis = self.hypernet_lat(torch.concat([pos, pos_his], dim=-1)).squeeze(-1)  # for concat
         else:
             latent_dis = self.calculate_cosine(pos, pos_his)
         latent_dis = self.act_dict.get(self.act_fn)(latent_dis)
