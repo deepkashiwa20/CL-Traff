@@ -12,9 +12,11 @@ def RMSE(y_true, y_pred):
     rmse = torch.sqrt(MSE(y_true, y_pred))
     return rmse
         
-def MAE(y_true, y_pred):
+def MAE(y_true, y_pred, mask=None):
     
     mae = torch.abs(y_pred - y_true)
+    if mask is not None:
+        mae = mae * mask
     mae = torch.mean(mae)
     return mae
 
