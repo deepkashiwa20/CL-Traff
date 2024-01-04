@@ -16,8 +16,10 @@ def MAE(y_true, y_pred, mask=None):
     
     mae = torch.abs(y_pred - y_true)
     if mask is not None:
+        mae_ig = mae * (1 - mask)
         mae = mae * mask
     mae = torch.mean(mae)
+    mae_ig = torch.mean(mae_ig)
     return mae
 
 

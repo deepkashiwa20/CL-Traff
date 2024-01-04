@@ -220,7 +220,7 @@ parser.add_argument('--gpu', type=int, default=0, help='which gpu to use')
 parser.add_argument('--seed', type=int, default=100, help='random seed.')
 # TODO: support contra learning
 parser.add_argument('--temp', type=float, default=1.0, help='temperature parameter')
-parser.add_argument('--lamb', type=float, default=0.1, help='contra loss lambda') 
+parser.add_argument('--lamb', type=float, default=0.0, help='contra loss lambda') 
 parser.add_argument('--lamb1', type=float, default=0.0, help='compact loss lambda') 
 parser.add_argument('--lamb2', type=float, default=1.0, help='anomaly detection loss lambda') 
 parser.add_argument('--schema', type=int, default=4, choices=[1, 2, 3, 4], help='which schema to implement latent distance')
