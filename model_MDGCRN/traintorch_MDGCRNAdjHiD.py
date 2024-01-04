@@ -206,7 +206,7 @@ parser.add_argument('--mem_num', type=int, default=20, help='number of meta-node
 parser.add_argument('--mem_dim', type=int, default=64, help='dimension of meta-nodes/prototypes')
 parser.add_argument("--loss", type=str, default='mask_mae_loss', help="mask_mae_loss")
 parser.add_argument("--epochs", type=int, default=200, help="number of epochs of training")
-parser.add_argument("--patience", type=int, default=20, help="patience used for early stop")
+parser.add_argument("--patience", type=int, default=30, help="patience used for early stop")
 parser.add_argument("--batch_size", type=int, default=64, help="size of the batches")
 parser.add_argument("--lr", type=float, default=0.01, help="base learning rate")
 parser.add_argument("--steps", type=eval, default=[50, 100], help="steps")
