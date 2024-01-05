@@ -16,10 +16,12 @@ def MAE(y_true, y_pred, mask=None):
     
     mae = torch.abs(y_pred - y_true)
     if mask is not None:
-        mae_ig = mae * (1 - mask)
-        mae = mae * mask
+        mae_ig = mae * (1 - mask)  # max: 0.5 (0.9422?) min:0, but max should be close 0
+        mae = mae * mask  # max: 0.65, min:0
     mae = torch.mean(mae)
-    mae_ig = torch.mean(mae_ig)
+    anomoly_num = torch.sum(mask)
+    normal_num = torch.sum(1 - mask)  # in general, normal = 3 * anomoly
+    mae_ig = torch.mean(mae_ig)  # mae_ig = 3 * mae alought max:0.9422, mean:0.04, i.e., most is accurately predicted
     return mae
 
 

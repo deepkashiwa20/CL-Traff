@@ -204,7 +204,7 @@ class MDGCRNAdjHiD(nn.Module):
         score = F.cosine_similarity(pos, pos_his, dim=-1)  # B, N
         
         if self.schema == 4:  #* add mask
-            mask = (torch.mean(pos.eq(pos_his).float(), dim=-1) < 1).int()
+            mask = (torch.mean(pos.eq(pos_his).float(), dim=-1) < 1).int()  # True means anomoly
         return (1 - score) / 2, mask  # normalized [0, 1]
     
     def forward(self, x, x_cov, x_his, y_cov, labels=None, batches_seen=None):
@@ -227,7 +227,7 @@ class MDGCRNAdjHiD(nn.Module):
             latent_dis = self.hypernet_lat(torch.concat([pos, pos_his], dim=-1)).squeeze(-1)  # for concat
         else:
             latent_dis, mask_dis = self.calculate_cosine(pos, pos_his)
-        latent_dis = self.act_dict.get(self.act_fn)(latent_dis)
+        # latent_dis = self.act_dict.get(self.act_fn)(latent_dis)  # 经过激活函数后max与min的差距反而变小了
         
         h_aug = torch.cat([h_t, h_att], dim=-1) # B, N, D
         

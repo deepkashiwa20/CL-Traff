@@ -149,7 +149,7 @@ def traintest_model():
             else:
                 pass
             loss1 = compact_loss(query, pos.detach())
-            detect_loss = MAE(real_dis, latent_dis, mask=mask_dis) 
+            detect_loss = MAE(real_dis, latent_dis, mask=mask_dis)
             loss = mae_loss + args.lamb * u_loss + args.lamb1 * loss1 + args.lamb2 * detect_loss
             losses.append(loss.item())
             mae_losses.append(mae_loss.item())
