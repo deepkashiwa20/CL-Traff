@@ -224,7 +224,7 @@ parser.add_argument('--lamb', type=float, default=0.0, help='contra loss lambda'
 parser.add_argument('--lamb1', type=float, default=0.0, help='compact loss lambda') 
 parser.add_argument('--lamb2', type=float, default=1.0, help='anomaly detection loss lambda') 
 parser.add_argument('--schema', type=int, default=4, choices=[1, 2, 3, 4], help='which schema to implement latent distance')
-parser.add_argument('--contra_loss', type=str, choices=['triplet', 'infonce'], default='triplet', help='whether to triplet or infonce contra loss')
+parser.add_argument('--contra_loss', type=str, choices=['triplet', 'infonce'], default='infonce', help='whether to triplet or infonce contra loss')
 parser.add_argument('--compact_loss', type=str, choices=['mse', 'rmse', 'mae'], default='mse', help='whether to triplet or infonce contra loss')
 args = parser.parse_args()
         

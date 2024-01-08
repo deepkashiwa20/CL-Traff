@@ -227,7 +227,7 @@ class MDGCRNAdjHiD(nn.Module):
             latent_dis = self.hypernet_lat(torch.concat([pos, pos_his], dim=-1)).squeeze(-1)  # for concat
         else:
             # latent_dis, mask_dis = self.calculate_cosine(pos, pos_his)
-            latent_dis, mask_dis = self.calculate_cosine(query, query_his)
+            latent_dis, mask_dis = self.calculate_cosine(query, pos_his)
         latent_dis = self.act_dict.get(self.act_fn)(latent_dis)  # 经过激活函数后max与min的差距反而变小了
         
         h_aug = torch.cat([h_t, h_att], dim=-1) # B, N, D

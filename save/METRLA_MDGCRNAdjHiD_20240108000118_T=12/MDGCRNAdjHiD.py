@@ -185,14 +185,14 @@ class MDGCRNAdjHiD(nn.Module):
         att_score = torch.softmax(torch.matmul(query, self.memory['Memory'].t()), dim=-1)         # alpha: (B, N, M)
         value = torch.matmul(att_score, self.memory['Memory'])     # (B, N, d)
         _, ind = torch.topk(att_score, k=2, dim=-1)
-        pos = self.memory['Memory'][ind[:, :, 0]] # B, N, d
+        pos = self.memory['Memory'][ind[:, :, :, 0]] # B, N, d
         if self.contra_loss in ['infonce']:  # InfoNCE loss
-            neg = self.memory['Memory'].repeat(query.shape[0], self.num_nodes, 1, 1)  # (B, N, M, d)
-            mask_index = ind[:, :, [0]]  # B, N, 1
+            neg = self.memory['Memory'].repeat(query.shape[0], query.shape[1],self.num_nodes, 1, 1)  # (B, N, M, d)
+            mask_index = ind[:, :, :, [0]]  # B, N, 1
             mask = torch.zeros_like(att_score, dtype=torch.bool).to(att_score.device)  # B, N, M
             mask = mask.scatter(-1, mask_index, True)  
         elif self.contra_loss in ['triplet']:  # Triplet loss
-            neg = self.memory['Memory'][ind[:, :, 1]] # B, N, d
+            neg = self.memory['Memory'][ind[:, :, :, 1]] # B, N, d
             mask = None
         else:
             pass
@@ -212,16 +212,16 @@ class MDGCRNAdjHiD(nn.Module):
         init_state = self.encoder.init_hidden(x.shape[0])
         h_en, state_en = self.encoder(x, init_state, supports_en) # B, T, N, hidden
         h_t = h_en[:, -1, :, :] # B, N, hidden (last state)    
-        h_att, query, pos, neg, mask = self.query_memory(h_t)    
+        h_att, query, pos, neg, mask = self.query_memory(h_en)    
         
         # TODO: for x_his
         h_his_en, state_his_en = self.encoder(x_his, init_state, supports_en) # B, T, N, hidden
         h_his_t = h_his_en[:, -1, :, :] # B, N, hidden (last state)      
-        h_his_att, query_his, pos_his, neg_his, mask_his = self.query_memory(h_his_t)
+        h_his_att, query_his, pos_his, neg_his, mask_his = self.query_memory(h_his_en)
         
         # TODO: detection loss
         # normalization [0, 1]
-        real_dis = (torch.clamp(torch.abs(x-x_his)[:, -1, :, :].squeeze(-1), min=self.diff_min, max=self.diff_max) - self.diff_min) / (self.diff_max - self.diff_min) 
+        real_dis = (torch.clamp(torch.abs(x-x_his).squeeze(-1), min=self.diff_min, max=self.diff_max) - self.diff_min) / (self.diff_max - self.diff_min) 
         if self.schema == 1:
             # latent_dis = self.hypernet_lat(pos - pos_his).squeeze(-1)  # for add / subtract
             latent_dis = self.hypernet_lat(torch.concat([pos, pos_his], dim=-1)).squeeze(-1)  # for concat
@@ -230,7 +230,7 @@ class MDGCRNAdjHiD(nn.Module):
             latent_dis, mask_dis = self.calculate_cosine(query, query_his)
         latent_dis = self.act_dict.get(self.act_fn)(latent_dis)  # 经过激活函数后max与min的差距反而变小了
         
-        h_aug = torch.cat([h_t, h_att], dim=-1) # B, N, D
+        h_aug = torch.cat([h_t, h_att[:, -1, :, :]], dim=-1) # B, N, D
         
         node_embeddings = self.hypernet(h_aug) # B, N, e
         support = F.softmax(F.relu(torch.einsum('bnc,bmc->bnm', node_embeddings, node_embeddings)), dim=-1) 
