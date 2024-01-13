@@ -4,6 +4,8 @@ import torch.nn as nn
 import math
 import numpy as np
 
+TSLOT = 24 * 12
+
 class AGCN(nn.Module):
     def __init__(self, dim_in, dim_out, cheb_k):
         super(AGCN, self).__init__()
@@ -120,7 +122,7 @@ class ADCRNN_Decoder(nn.Module):
 
 class MDGCRNAdjHiD(nn.Module):
     def __init__(self, num_nodes, input_dim, output_dim, horizon, rnn_units, rnn_layers=1, cheb_k=3,
-                 ycov_dim=1, mem_num=20, mem_dim=64, embed_dim=10, adj_mx=None, cl_decay_steps=2000, 
+                 ycov_dim=1, mem_num=20, mem_dim=64, embed_dim=10, time_dim=10, adj_mx=None, cl_decay_steps=2000, 
                  use_curriculum_learning=True, contra_loss='triplet', diff_max=3.74, diff_min=0, schema=1, device="cpu"):
         super(MDGCRNAdjHiD, self).__init__()
         self.num_nodes = num_nodes
@@ -132,6 +134,7 @@ class MDGCRNAdjHiD(nn.Module):
         self.cheb_k = cheb_k
         self.ycov_dim = ycov_dim
         self.embed_dim = embed_dim
+        self.time_dim = time_dim
         self.cl_decay_steps = cl_decay_steps
         self.use_curriculum_learning = use_curriculum_learning
         # TODO: support contrastive learning
@@ -150,7 +153,7 @@ class MDGCRNAdjHiD(nn.Module):
         self.encoder = ADCRNN_Encoder(self.num_nodes, self.input_dim, self.rnn_units, self.cheb_k, self.rnn_layers)
         
         # deocoder
-        self.decoder_dim = self.rnn_units + self.mem_dim
+        self.decoder_dim = self.rnn_units * 2 #+ self.mem_dim
         self.decoder = ADCRNN_Decoder(self.num_nodes, self.output_dim + self.ycov_dim, self.decoder_dim, self.cheb_k, self.rnn_layers)
 
         # output
@@ -159,6 +162,14 @@ class MDGCRNAdjHiD(nn.Module):
         # graph
         self.adj_mx = adj_mx
         self.hypernet = nn.Sequential(nn.Linear(self.decoder_dim, self.embed_dim, bias=True))
+        
+        # # embedding
+        # self.node_embedding = nn.Embedding(self.num_nodes, self.embed_dim)
+        # self.time_embedding = nn.Embedding(TSLOT, self.time_dim)
+        
+        # backcast branch
+        self.backcast = nn.Linear(self.rnn_units, self.output_dim)
+        
         
         # latent distance
         if self.schema == 1:
@@ -212,12 +223,25 @@ class MDGCRNAdjHiD(nn.Module):
         init_state = self.encoder.init_hidden(x.shape[0])
         h_en, state_en = self.encoder(x, init_state, supports_en) # B, T, N, hidden
         h_t = h_en[:, -1, :, :] # B, N, hidden (last state)    
-        h_att, query, pos, neg, mask = self.query_memory(h_t)    
-        
+         
         # TODO: for x_his
         h_his_en, state_his_en = self.encoder(x_his, init_state, supports_en) # B, T, N, hidden
         h_his_t = h_his_en[:, -1, :, :] # B, N, hidden (last state)      
-        h_his_att, query_his, pos_his, neg_his, mask_his = self.query_memory(h_his_t)
+        
+        # TODO: Backcast branch
+        x_back = self.backcast(h_en)
+        x_res = x - x_back
+        x_back_his = self.backcast(h_his_en)
+        x_res_his = x_his - x_back_his
+        #* once again
+        h_var_en, state_var_en = self.encoder(x_res, init_state, supports_en) # B, T, N, hidden
+        h_var_t = h_var_en[:, -1, :, :] # B, N, hidden (last state)   
+        h_his_en_var, state_his_en_var = self.encoder(x_res_his, init_state, supports_en) # B, T, N, hidden
+        h_his_t_var = h_his_en_var[:, -1, :, :] # B, N, hidden (last state) 
+        
+        # query memory
+        h_att, query, pos, neg, mask = self.query_memory(h_var_t)   
+        h_his_att, query_his, pos_his, neg_his, mask_his = self.query_memory(h_his_t_var)
         
         # TODO: detection loss
         # normalization [0, 1]
@@ -230,7 +254,7 @@ class MDGCRNAdjHiD(nn.Module):
             # latent_dis, mask_dis = self.calculate_cosine(query, query_his)
         latent_dis = self.act_dict.get(self.act_fn)(latent_dis)  # 经过激活函数后max与min的差距反而变小了
         
-        h_aug = torch.cat([h_t, h_att], dim=-1) # B, N, D
+        h_aug = torch.cat([h_t, h_var_t], dim=-1) # B, N, D
         
         node_embeddings = self.hypernet(h_aug) # B, N, e
         support = F.softmax(F.relu(torch.einsum('bnc,bmc->bnm', node_embeddings, node_embeddings)), dim=-1) 
@@ -276,7 +300,7 @@ def main():
     parser.add_argument('--rnn_units', type=int, default=64, help='number of hidden units')
     args = parser.parse_args()
     device = torch.device("cuda:{}".format(args.gpu)) if torch.cuda.is_available() else torch.device("cpu")
-    model = MemDGCRN(num_nodes=args.num_variable, input_dim=args.channelin, output_dim=args.channelout, horizon=args.seq_len, rnn_units=args.rnn_units).to(device)
+    model = MDGCRNAdjHiD(num_nodes=args.num_variable, input_dim=args.channelin, output_dim=args.channelout, horizon=args.seq_len, rnn_units=args.rnn_units).to(device)
     summary(model, [(args.his_len, args.num_variable, args.channelin), (args.seq_len, args.num_variable, args.channelout)], device=device)
     print_params(model)
     

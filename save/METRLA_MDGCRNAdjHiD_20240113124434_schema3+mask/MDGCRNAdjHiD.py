@@ -203,7 +203,7 @@ class MDGCRNAdjHiD(nn.Module):
             pos, pos_his = self.hypernet_lat(pos), self.hypernet_lat(pos_his)  # B, N, d
         score = F.cosine_similarity(pos, pos_his, dim=-1)  # B, N
         
-        if self.schema == 4:  #* add mask
+        if self.schema == 3:  #* add mask
             mask = (torch.mean(pos.eq(pos_his).float(), dim=-1) < 1).int()  # True means anomoly
         return (1 - score) / 2, mask  # normalized [0, 1]
     
@@ -226,8 +226,8 @@ class MDGCRNAdjHiD(nn.Module):
             # latent_dis = self.hypernet_lat(pos - pos_his).squeeze(-1)  # for add / subtract
             latent_dis = self.hypernet_lat(torch.concat([pos, pos_his], dim=-1)).squeeze(-1)  # for concat
         else:
-            latent_dis, mask_dis = self.calculate_cosine(pos, pos_his)
-            # latent_dis, mask_dis = self.calculate_cosine(query, query_his)
+            # latent_dis, mask_dis = self.calculate_cosine(pos, pos_his)
+            latent_dis, mask_dis = self.calculate_cosine(query, query_his)
         latent_dis = self.act_dict.get(self.act_fn)(latent_dis)  # 经过激活函数后max与min的差距反而变小了
         
         h_aug = torch.cat([h_t, h_att], dim=-1) # B, N, D
@@ -276,7 +276,7 @@ def main():
     parser.add_argument('--rnn_units', type=int, default=64, help='number of hidden units')
     args = parser.parse_args()
     device = torch.device("cuda:{}".format(args.gpu)) if torch.cuda.is_available() else torch.device("cpu")
-    model = MemDGCRN(num_nodes=args.num_variable, input_dim=args.channelin, output_dim=args.channelout, horizon=args.seq_len, rnn_units=args.rnn_units).to(device)
+    model = MDGCRNAdjHiD(num_nodes=args.num_variable, input_dim=args.channelin, output_dim=args.channelout, horizon=args.seq_len, rnn_units=args.rnn_units).to(device)
     summary(model, [(args.his_len, args.num_variable, args.channelin), (args.seq_len, args.num_variable, args.channelout)], device=device)
     print_params(model)
     
