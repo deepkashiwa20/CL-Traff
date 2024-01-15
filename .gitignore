@@ -13,3 +13,8 @@ model/traintest_GCRN_old.py
 visualizations/METRLA
 METRLA/day-ha-la.pkl
 METRLA/week-ha-la.pkl
+PEMSBAY/pems-bay.h5
+EXPYTKY/gen_dataplus_expytky.zip
+EXPYTKY/expy-tky_plus_202110.csv.gz
+EXPYTKY/expy-tky_plus_202111.csv.gz
+EXPYTKY/expy-tky_plus_202112.csv.gz

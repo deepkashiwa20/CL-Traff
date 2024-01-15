@@ -1,0 +1,36 @@
+[common]
+N_link = 2841
+adjdis_path = ./EXPYTKY/expy-tky_adjdis.npy
+adj01_path = ./EXPYTKY/expy-tky_adj01.npy
+road_path = ./EXPYTKY/expy-tky_link_info.csv
+history_average = ./EXPYTKY/expytky-HI.csv.gz
+
+[202105]
+traffic_path = ../data/capitaltraffic_202105.csv.gz
+trafficplus_path = ../data/capitaltrafficplus_202105.csv.gz
+
+[202110]
+traffic_path = ./EXPYTKY/expy-tky_202110.csv.gz
+trafficplus_path = ./EXPYTKY/expy-tky_plus_202110.csv.gz
+
+[202111]
+traffic_path = ./EXPYTKY/expy-tky_202111.csv.gz
+trafficplus_path = ./EXPYTKY/expy-tky_plus_202111.csv.gz
+
+[202112] 
+test_month = ['202112']
+train_month = ['202110', '202111']
+traffic_path = ./EXPYTKY/expy-tky_202112.csv.gz
+trafficplus_path = ./EXPYTKY/expy-tky_plus_202112.csv.gz
+
+[tokyo]
+subroad_path = ../data/tokyo_road_idx.csv
+
+[kanagawa]
+subroad_path = ../data/kanagawa_road_idx.csv
+
+[bayshore]
+subroad_path = ../data/bayshore_road_idx.csv
+
+[capital]
+subroad_path = ../data/capital_road_idx.csv

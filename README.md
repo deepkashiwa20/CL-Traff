@@ -1,7 +1,12 @@
 # CL-Traff
 An implementation of CL-Traff under GCRN backbone.
-
 #### Latest Release
+* 生成PEMS-BAY的数据
+* python generate_training_data_his_BAY.py
+* 生成EXPYTKY的数据
+* python generate_training_data_his_EXPYTKY.py
+
+#### Latest Release1
 * cd model_MDGCRN
 * python traintorch_MDGCRNAdjHiD.py --gpu=0 --lamb xxx --lamb2 xxx --schema xxx
 * 如果不使用对比学习, 设置--lamb 0, 即只使用MAE loss + detection loss, 有3种detection loss实现方式:
