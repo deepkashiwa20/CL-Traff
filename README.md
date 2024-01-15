@@ -1,10 +1,11 @@
 # CL-Traff
 An implementation of CL-Traff under GCRN backbone.
 #### Latest Release
-* 生成PEMS-BAY的数据
+* 生成PEMS-BAY的数据 (Finish)
 * python generate_training_data_his_BAY.py
-* 生成EXPYTKY的数据
+* 生成EXPYTKY的数据 (Un-finish)
 * python generate_training_data_his_EXPYTKY.py
+* cd model_MDGCRN & python traintorch_MDGCRNAdjHiDD.py --gpu 0
 
 #### Latest Release1
 * cd model_MDGCRN
