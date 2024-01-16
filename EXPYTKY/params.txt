@@ -12,16 +12,19 @@ trafficplus_path = ../data/capitaltrafficplus_202105.csv.gz
 [202110]
 traffic_path = ./EXPYTKY/expy-tky_202110.csv.gz
 trafficplus_path = ./EXPYTKY/expy-tky_plus_202110.csv.gz
+traffichis_path = ./EXPYTKY/train.npz
 
 [202111]
 traffic_path = ./EXPYTKY/expy-tky_202111.csv.gz
 trafficplus_path = ./EXPYTKY/expy-tky_plus_202111.csv.gz
+traffichis_path = ./EXPYTKY/val.npz
 
 [202112] 
 test_month = ['202112']
 train_month = ['202110', '202111']
 traffic_path = ./EXPYTKY/expy-tky_202112.csv.gz
 trafficplus_path = ./EXPYTKY/expy-tky_plus_202112.csv.gz
+traffichis_path = ./EXPYTKY/test.npz
 
 [tokyo]
 subroad_path = ../data/tokyo_road_idx.csv
@@ -34,3 +37,9 @@ subroad_path = ../data/bayshore_road_idx.csv
 
 [capital]
 subroad_path = ../data/capital_road_idx.csv
+
+[EXPYTKY]
+subroad_path = ./EXPYTKY/tokyo_link_idx.csv
+
+[EXPYTKY*]
+subroad_path = ./EXPYTKY/tokyoall_link_idx.csv

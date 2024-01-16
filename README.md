@@ -3,9 +3,12 @@ An implementation of CL-Traff under GCRN backbone.
 #### Latest Release
 * 生成PEMS-BAY的数据 (Finish)
 * python generate_training_data_his_BAY.py
-* 生成EXPYTKY的数据 (Un-finish)
+* 生成EXPYTKY的数据 (Finish)
 * python generate_training_data_his_EXPYTKY.py
+* 实现MDGCRNAdjHiDD.py
 * cd model_MDGCRN & python traintorch_MDGCRNAdjHiDD.py --gpu 0
+* 实现MDGCRN_EXPYTKY
+* cd model_MDGCRN_EXPYTKY & python traintorch_MDGCRNAdjHiDD.py --gpu 0
 
 #### Latest Release1
 * cd model_MDGCRN
