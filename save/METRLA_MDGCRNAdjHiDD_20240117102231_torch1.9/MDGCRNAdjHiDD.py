@@ -194,9 +194,7 @@ class MDGCRNAdjHiDD(nn.Module):
         return value, query, pos, neg, mask
     
     def calculate_cosine(self, pos, pos_his, use_mask=False, mask=None):
-        # score = F.cosine_similarity(pos, pos_his, dim=-1)  # B, N
-        score = torch.sum(torch.square(pos - pos_his), dim=-1)
-        return score, mask
+        score = F.cosine_similarity(pos, pos_his, dim=-1)  # B, N
         if use_mask:  #* add mask
             mask = (torch.mean(pos.eq(pos_his).float(), dim=-1) < 1).int()  # True means anomoly
         return (1 - score) / 2, mask  # normalized [0, 1]
@@ -215,8 +213,7 @@ class MDGCRNAdjHiDD(nn.Module):
         
         # TODO: detection loss
         # normalization [0, 1]
-        # real_dis = (torch.clamp(torch.abs(x-x_his)[:, -1, :, :].squeeze(-1), min=self.diff_min, max=self.diff_max) - self.diff_min) / (self.diff_max - self.diff_min) 
-        real_dis, _ = self.calculate_cosine(query, query_his)
+        real_dis = (torch.clamp(torch.abs(x-x_his)[:, -1, :, :].squeeze(-1), min=self.diff_min, max=self.diff_max) - self.diff_min) / (self.diff_max - self.diff_min) 
         latent_dis, mask_dis = self.calculate_cosine(pos, pos_his, use_mask=self.use_mask)
         latent_dis = self.act_dict.get(self.act_fn)(latent_dis)
         
