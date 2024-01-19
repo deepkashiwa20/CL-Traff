@@ -14,10 +14,10 @@ import logging
 from utils import StandardScaler, masked_mae_loss, masked_mape_loss, masked_mse_loss, masked_rmse_loss
 from utils import load_adj
 from metrics import RMSE, MAE, MSE
-from MDGCRNAdjHiD import MDGCRNAdjHiD
+from MDGCRNAdjHiDD import MDGCRNAdjHiDD
 
 class ContrastiveLoss():
-    def __init__(self, contra_loss='triplet', mask=None, temp=0.1, margin=1.0):
+    def __init__(self, contra_loss='triplet', mask=None, temp=1.0, margin=1.0):
         self.infonce = contra_loss in ['infonce']
         self.mask = mask
         self.temp = temp
@@ -35,7 +35,6 @@ class ContrastiveLoss():
             return separate_loss(query, pos.detach(), neg.detach())
         else:
             score_matrix = F.cosine_similarity(query.unsqueeze(-2), neg, dim=-1)  # (B, N, M)
-            # score_matrix = -1.0 * torch.sqrt(torch.sum((query.unsqueeze(-2) - neg) ** 2, dim=-1))
             score_matrix = torch.exp(score_matrix / self.temp)
             pos_sum = torch.sum(score_matrix * mask, dim=-1)
             ratio = pos_sum / torch.sum(score_matrix, dim=-1)
@@ -55,10 +54,10 @@ def print_model(model):
 def get_model():
     adj_mx = load_adj(adj_mx_path, args.adj_type)
     adjs = [torch.tensor(i).to(device) for i in adj_mx]            
-    model = MDGCRNAdjHiD(num_nodes=args.num_nodes, input_dim=args.input_dim, output_dim=args.output_dim, horizon=args.horizon, 
+    model = MDGCRNAdjHiDD(num_nodes=args.num_nodes, input_dim=args.input_dim, output_dim=args.output_dim, horizon=args.horizon, 
                  rnn_units=args.rnn_units, rnn_layers=args.rnn_layers, cheb_k = args.max_diffusion_step, mem_num=args.mem_num, 
                  mem_dim=args.mem_dim, embed_dim=args.embed_dim, adj_mx = adjs, cl_decay_steps=args.cl_decay_steps, use_curriculum_learning=args.use_curriculum_learning, 
-                 contra_loss=args.contra_loss, diff_max=diff_max, diff_min=diff_min, schema=args.schema, device=device).to(device)
+                 contra_loss=args.contra_loss, diff_max=diff_max, diff_min=diff_min, use_mask=args.use_mask, device=device).to(device)
     return model
 
 def prepare_x_y(x, y):
@@ -72,7 +71,7 @@ def prepare_x_y(x, y):
     """
     x0 = x[..., 0:1]
     x1 = x[..., 1:2]
-    x2 = x[..., 2:3]  # HI
+    x2 = x[..., 2:3]  
     y0 = y[..., 0:1]
     y1 = y[..., 1:2]
     y2 = y[..., 2:3]
@@ -81,7 +80,7 @@ def prepare_x_y(x, y):
 def evaluate(model, mode):
     with torch.no_grad():
         model = model.eval()
-        data_iter =  data[f'{mode}_loader']#.get_iterator()
+        data_iter =  data[f'{mode}_loader']
         ys_true, ys_pred = [], []
         losses = []
         for x, y in data_iter:
@@ -129,7 +128,7 @@ def traintest_model():
     for epoch_num in range(args.epochs):
         start_time = time.time()
         model = model.train()
-        data_iter = data['train_loader']#.get_iterator()
+        data_iter = data['train_loader']
         losses, mae_losses, contra_losses, compact_losses, detect_losses = [], [], [], [], []
         for x, y in data_iter:
             optimizer.zero_grad()
@@ -148,14 +147,23 @@ def traintest_model():
                 compact_loss = MAE
             else:
                 pass
-            loss1 = compact_loss(query, pos.detach())
-            detect_loss = MAE(real_dis, latent_dis, mask=mask_dis)
-            loss = mae_loss + args.lamb * u_loss + args.lamb1 * loss1 + args.lamb2 * detect_loss
+            loss_c = compact_loss(query, pos.detach())
+            
+            if args.detect_loss == 'mse':
+                detect_loss = MSE
+            elif args.detect_loss == 'rmse':
+                detect_loss = RMSE
+            elif args.detect_loss == 'mae':
+                detect_loss = MAE
+            else:
+                pass
+            loss_d = detect_loss(real_dis, latent_dis, mask=mask_dis)
+            loss = mae_loss + args.lamb * u_loss + args.lamb1 * loss_c + args.lamb2 * loss_d
             losses.append(loss.item())
             mae_losses.append(mae_loss.item())
             contra_losses.append(u_loss.item())
-            compact_losses.append(loss1.item())
-            detect_losses.append(detect_loss.item())
+            compact_losses.append(loss_c.item())
+            detect_losses.append(loss_d.item())
             losses.append(loss.item())
             batches_seen += 1
             loss.backward()
@@ -223,9 +231,10 @@ parser.add_argument('--temp', type=float, default=1.0, help='temperature paramet
 parser.add_argument('--lamb', type=float, default=0.1, help='contra loss lambda') 
 parser.add_argument('--lamb1', type=float, default=0.0, help='compact loss lambda') 
 parser.add_argument('--lamb2', type=float, default=1.0, help='anomaly detection loss lambda') 
-parser.add_argument('--schema', type=int, default=2, choices=[1, 2, 3, 4], help='which schema to implement latent distance')
 parser.add_argument('--contra_loss', type=str, choices=['triplet', 'infonce'], default='infonce', help='whether to triplet or infonce contra loss')
-parser.add_argument('--compact_loss', type=str, choices=['mse', 'rmse', 'mae'], default='mse', help='whether to triplet or infonce contra loss')
+parser.add_argument('--compact_loss', type=str, choices=['mse', 'rmse', 'mae'], default='mse', help='which method to calculate compact loss')
+parser.add_argument('--detect_loss', type=str, choices=['mse', 'rmse', 'mae'], default='mae', help='which method to calculate detect loss')
+parser.add_argument("--use_mask", type=eval, choices=[True, False], default='False', help="use mask to calculate detect loss")
 args = parser.parse_args()
         
 if args.dataset == 'METRLA':
@@ -239,7 +248,7 @@ elif args.dataset == 'PEMSBAY':
 else:
     pass # including more datasets in the future    
 
-model_name = 'MDGCRNAdjHiD'
+model_name = 'MDGCRNAdjHiDD'
 timestring = time.strftime('%Y%m%d%H%M%S', time.localtime())
 path = f'../save/{args.dataset}_{model_name}_{timestring}'
 logging_path = f'{path}/{model_name}_{timestring}_logging.txt'

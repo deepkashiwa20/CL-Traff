@@ -118,11 +118,12 @@ class ADCRNN_Decoder(nn.Module):
         return current_inputs, output_hidden
 
 
-class MDGCRNAdjHiD(nn.Module):
+class MDGCRNAdjHiDD(nn.Module):
     def __init__(self, num_nodes, input_dim, output_dim, horizon, rnn_units, rnn_layers=1, cheb_k=3,
                  ycov_dim=1, mem_num=20, mem_dim=64, embed_dim=10, adj_mx=None, cl_decay_steps=2000, 
-                 use_curriculum_learning=True, contra_loss='triplet', diff_max=3.74, diff_min=0, schema=1, device="cpu"):
-        super(MDGCRNAdjHiD, self).__init__()
+                 use_curriculum_learning=True, contra_loss='triplet', diff_max=3.74, diff_min=0, 
+                 use_mask=False, device="cpu"):
+        super(MDGCRNAdjHiDD, self).__init__()
         self.num_nodes = num_nodes
         self.input_dim = input_dim
         self.rnn_units = rnn_units
@@ -139,7 +140,7 @@ class MDGCRNAdjHiD(nn.Module):
         self.device = device
         self.diff_min = diff_min
         self.diff_max = diff_max
-        self.schema = schema
+        self.use_mask = use_mask
         
         # memory
         self.mem_num = mem_num
@@ -158,14 +159,8 @@ class MDGCRNAdjHiD(nn.Module):
         
         # graph
         self.adj_mx = adj_mx
-        self.hypernet = nn.Sequential(nn.Linear(self.decoder_dim, self.embed_dim, bias=True))
+        self.hypernet = nn.Sequential(nn.Linear(self.decoder_dim*2, self.embed_dim, bias=True))
         
-        # latent distance
-        if self.schema == 1:
-            # self.hypernet_lat = nn.Sequential(nn.Linear(self.mem_dim, 1, bias=True))  # for add / subtract
-            self.hypernet_lat = nn.Sequential(nn.Linear(2*self.mem_dim, 1, bias=True))  # for concat
-        if self.schema == 3:
-            self.hypernet_lat = nn.Sequential(nn.Linear(self.mem_dim, self.mem_dim, bias=True))  # mlp projection
         self.act_dict = {'relu': nn.ReLU(), 'lrelu': nn.LeakyReLU(), 'sigmoid': nn.Sigmoid()}
         self.act_fn = 'sigmoid'  # 'relu' 'lrelu' 'sigmoid'
         
@@ -197,19 +192,15 @@ class MDGCRNAdjHiD(nn.Module):
         else:
             pass
         return value, query, pos, neg, mask
-            
-    def calculate_cosine(self, pos, pos_his, mask=None):
-        if self.schema == 5:
-            score = torch.sum(torch.square(pos - pos_his), dim=-1)
-            return score, mask
-        if self.schema == 3:
-            pos, pos_his = self.hypernet_lat(pos), self.hypernet_lat(pos_his)  # B, N, d
-        score = F.cosine_similarity(pos, pos_his, dim=-1)  # B, N
-        
-        if self.schema == 4:  #* add mask
+    
+    def calculate_cosine(self, pos, pos_his, use_mask=False, mask=None):
+        # score = F.cosine_similarity(pos, pos_his, dim=-1)  # B, N
+        score = torch.sum(torch.square(pos - pos_his), dim=-1)
+        return score, mask
+        if use_mask:  #* add mask
             mask = (torch.mean(pos.eq(pos_his).float(), dim=-1) < 1).int()  # True means anomoly
         return (1 - score) / 2, mask  # normalized [0, 1]
-    
+            
     def forward(self, x, x_cov, x_his, y_cov, labels=None, batches_seen=None):
         supports_en = self.adj_mx
         init_state = self.encoder.init_hidden(x.shape[0])
@@ -224,25 +215,25 @@ class MDGCRNAdjHiD(nn.Module):
         
         # TODO: detection loss
         # normalization [0, 1]
-        if self.schema == 5:
-            real_dis, _ = self.calculate_cosine(query, query_his)
-        else:
-            real_dis = (torch.clamp(torch.abs(x-x_his)[:, -1, :, :].squeeze(-1), min=self.diff_min, max=self.diff_max) - self.diff_min) / (self.diff_max - self.diff_min) 
-        if self.schema == 1:
-            # latent_dis = self.hypernet_lat(pos - pos_his).squeeze(-1)  # for add / subtract
-            latent_dis = self.hypernet_lat(torch.concat([pos, pos_his], dim=-1)).squeeze(-1)  # for concat
-        else:
-            latent_dis, mask_dis = self.calculate_cosine(pos, pos_his)
-            # latent_dis, mask_dis = self.calculate_cosine(query, query_his)
-        latent_dis = self.act_dict.get(self.act_fn)(latent_dis)  # 经过激活函数后max与min的差距反而变小了
+        # real_dis = (torch.clamp(torch.abs(x-x_his)[:, -1, :, :].squeeze(-1), min=self.diff_min, max=self.diff_max) - self.diff_min) / (self.diff_max - self.diff_min) 
+        real_dis, _ = self.calculate_cosine(query, query_his)
+        latent_dis, mask_dis = self.calculate_cosine(pos, pos_his, use_mask=self.use_mask)
+        # latent_dis = self.act_dict.get(self.act_fn)(latent_dis)
         
-        h_aug = torch.cat([h_t, h_att], dim=-1) # B, N, D
+        # TODO: for additional query, pos, neg, mask
+        query = torch.cat([query, query_his], dim=0)
+        pos = torch.cat([pos, pos_his], dim=0)
+        neg = torch.cat([neg, neg_his], dim=0)
+        mask = torch.cat([mask, mask_his], dim=0) if mask is not None else None
+        
+        h_de = torch.cat([h_t, h_att], dim=-1)
+        h_aug = torch.cat([h_t, h_att, h_his_t, h_his_att], dim=-1) # B, N, D
         
         node_embeddings = self.hypernet(h_aug) # B, N, e
         support = F.softmax(F.relu(torch.einsum('bnc,bmc->bnm', node_embeddings, node_embeddings)), dim=-1) 
         supports_de = [support]
         
-        ht_list = [h_aug]*self.rnn_layers
+        ht_list = [h_de]*self.rnn_layers
         go = torch.zeros((x.shape[0], self.num_nodes, self.output_dim), device=x.device)
         out = []
         for t in range(self.horizon):
