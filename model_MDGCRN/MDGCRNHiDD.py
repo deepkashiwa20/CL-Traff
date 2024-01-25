@@ -205,7 +205,7 @@ class MDGCRNHiDD(nn.Module):
             
     def forward(self, x, x_cov, x_his, y_cov, labels=None, batches_seen=None):
         # supports_en = self.adj_mx
-        supports_en = F.softmax(F.relu(torch.mm(self.node_embeddings, self.node_embeddings.transpose(0, 1))), dim=1)
+        supports_en = [F.softmax(F.relu(torch.mm(self.node_embeddings, self.node_embeddings.transpose(0, 1))), dim=1)]
         init_state = self.encoder.init_hidden(x.shape[0])
         h_en, state_en = self.encoder(x, init_state, supports_en) # B, T, N, hidden
         h_t = h_en[:, -1, :, :] # B, N, hidden (last state)    
