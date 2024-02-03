@@ -9,6 +9,7 @@ An implementation of CL-Traff under GCRN backbone.
 * 3478数据集文件传一份或者给链接，要包含adj文件
 * 现在的主程序文件是 model_MDGCRN/traintorch_MDGCRNAdjHiDD.py, 目前支持 --dataset=METRLA 和 PEMSBAY
 * 可以修改/添加上主程序文件的252行, 让程序支持 --dataset=PEMS03/PEMS04/PEMS07/PEMS08, 注意程序需要adj才能跑起来
+* 跑起来之后check PEMS03/PEMS04/PEMS07/PEMS08 的train/val/test 的number of samples, 确保是和所有benchmark设置一样的！
 
 #### Latest Release
 * 生成PEMS-BAY的数据 (Finish)
