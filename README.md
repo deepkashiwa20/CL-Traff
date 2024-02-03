@@ -1,5 +1,15 @@
 # CL-Traff
 An implementation of CL-Traff under GCRN backbone.
+
+#### To Haotian
+* 参照生成PEMS-BAY的三通道数据 (0: speed, 1: gw-net的float的timeinday, 2:his_avg) 为 3478一件生成3通道
+* generate_training_data_his_BAY.py
+* generate_training_data_PEMS.py 这个文件是想把3478集成进来的数据处理文件 可能有一定的参考价值
+* 要确保三通道的前两个通道和benchmark数据保持一致
+* 3478数据集文件传一份或者给链接，要包含adj文件
+* 现在的主程序文件是 model_MDGCRN/traintorch_MDGCRNAdjHiDD.py, 目前支持 --dataset=METRLA 和 PEMSBAY
+* 可以修改/添加上主程序文件的252行, 让程序支持 --dataset=PEMS03/PEMS04/PEMS07/PEMS08, 注意程序需要adj才能跑起来
+
 #### Latest Release
 * 生成PEMS-BAY的数据 (Finish)
 * python generate_training_data_his_BAY.py
