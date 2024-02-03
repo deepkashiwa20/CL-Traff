@@ -3,7 +3,7 @@
 *.npy
 raw_data
 raw_data.zip
-PEMS0*
+
 METRLA/metr-la-plus.h5
 METRLA/adj_mx_ha_la.pkl
 visualizations/results

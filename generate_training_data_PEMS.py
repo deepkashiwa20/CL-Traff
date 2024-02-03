@@ -7,43 +7,21 @@ import argparse
 import numpy as np
 import os
 import pandas as pd
+from datetime import datetime,timedelta
 
 
-def generate_graph_seq2seq_io_data(
-        data, x_offsets, y_offsets, add_time_in_day=True, add_day_in_week=False, steps_per_day=12*24
-):
+def generate_graph_seq2seq_io_data_with_his(data, x_offsets, y_offsets):
     """
     Generate samples from
     :param df:
     :param x_offsets:
     :param y_offsets:
-    :param add_time_in_day:
-    :param add_day_in_week:
-    :param scaler:
     :return:
     # x: (epoch_size, input_length, num_nodes, input_dim)
     # y: (epoch_size, output_length, num_nodes, output_dim)
     """
 
-    num_samples, num_nodes, _ = data.shape
-    data_list = [data]
-    if add_time_in_day:
-        # numerical time_of_day
-        tod = [i % steps_per_day /
-               steps_per_day for i in range(data.shape[0])]
-        tod = np.array(tod)
-        tod_tiled = np.tile(tod, [1, num_nodes, 1]).transpose((2, 1, 0))
-        data_list.append(tod_tiled)
-    
-    if add_day_in_week:
-        # numerical day_of_week
-        dow = [(i // steps_per_day) % 7 for i in range(data.shape[0])]
-        dow = np.array(dow)
-        dow_tiled = np.tile(dow, [1, num_nodes, 1]).transpose((2, 1, 0))
-        data.append(dow_tiled)
-
-    data = np.concatenate(data_list, axis=-1)
-    # epoch_len = num_samples + min(x_offsets) - max(y_offsets)
+    num_samples = data.shape[0]
     x, y = [], []
     # t is the index of the last observation.
     min_t = abs(min(x_offsets))
@@ -58,24 +36,93 @@ def generate_graph_seq2seq_io_data(
     return x, y
 
 
+
 def generate_train_val_test(args):
     # read data
-    data = np.load(args.traffic_df_filename)["data"]
-    data = data[..., [0]]
+    dataset_name = args.dataset
+    # data = np.load("./PEMS04/PEMS04.npz")["data"]
+
+    data = np.load(f"{args.traffic_df_filename}")["data"]
+    data = data[..., 0]
+    df = pd.DataFrame(data)
     print("raw time series shape: {0}".format(data.shape))
-    
+    num_nodes={
+        "PEMS03": 358,
+        "PEMS04": 307,
+        "PEMS07": 883,
+        "PEMS08": 170,
+    }
+    start_dates = {
+        "PEMS03": "2018-09-01 00:00:00",
+        "PEMS04": "2018-01-01 00:00:00",
+        "PEMS07": "2017-05-01 00:00:00",
+        "PEMS08": "2016-07-01 00:00:00",
+    }
+    end_dates = {
+        "PEMS03": "2018-11-30 23:55:00",
+        "PEMS04": "2018-02-28 23:55:00",
+        "PEMS07": "2017-08-06 23:55:00",# Strange Value, should be 123 days according to STSGCN paper, but actually only 98 days
+        "PEMS08": "2016-08-31 23:55:00",
+    }
+    train_dates = {
+        "PEMS03": "2018-12-25 14:25:00",
+        "PEMS04": "2018-02-05 09:35:00",
+        "PEMS07": "2017-06-28 19:10:00",
+        "PEMS08": "2016-08-07 04:50:00",
+    }
+    timeslots = pd.date_range(start_dates[dataset_name], end_dates[dataset_name], freq='5min')
+    df.insert(0, 'timeslots', timeslots)
+    df_new = df.set_index('timeslots', drop=True, append=False, inplace=False, verify_integrity=False)
+
+    timeslots = pd.date_range('2017-01-01 00:00:00', '2017-06-30 23:55:00', freq='5min')
+    print(len(timeslots))
+    days = pd.date_range('2017-01-01 00:00:00', '2017-06-30 23:55:00', freq='1D')
+    print(len(days), 0.8 * len(days))
+    train_days = pd.date_range('2017-01-01 00:00:00', '2017-05-24 23:55:00', freq='1D')
+    print(len(train_days))
+    # print(len(timeslots), timeslots[0], timeslots[-1])
+    data = df_new.stack().reset_index()
+    data.columns = ['timestamp', 'sensorid', 'speed']
+    data['timeinday'] = (data['timestamp'].values - data['timestamp'].values.astype("datetime64[D]")) / np.timedelta64(
+        1, "D")
+    data['timestamp'] = pd.to_datetime(data['timestamp'])
+    data['weekdaytime'] = data['timestamp'].dt.weekday * 288 + (
+                data['timestamp'].dt.hour * 60 + data['timestamp'].dt.minute) // 5
+
+    df_train = data[(data.timestamp >= start_dates[dataset_name]) & (data.timestamp <= train_dates[dataset_name])]
+    df_train = df_train[['sensorid', 'weekdaytime', 'speed']]
+
+    def get_mean_without_null_values(data, null_val=0.):
+        return data[data != null_val].mean()
+
+    df_train_avg = df_train.groupby(['sensorid', 'weekdaytime']).aggregate(
+        {'speed': get_mean_without_null_values}).reset_index()
+
+    data_his = pd.merge(data, df_train_avg, on=['sensorid', 'weekdaytime'], suffixes=(None, '_y'))
+
+    sensorid_list = df_new.columns
+    timeslices = df_new.index
+    mux = pd.MultiIndex.from_product([timeslices, sensorid_list], names=['timestamp', 'sensorid'])
+    data_his = data_his.set_index(['timestamp', 'sensorid']).reindex(mux).reset_index()
+    data_his = data_his[['timestamp', 'sensorid', 'speed', 'timeinday', 'speed_y']]
+
+    print(np.array_equal(data_his['speed'].values.reshape(-1, num_nodes[dataset_name]), df_new.values))
+
+    data_his = data_his[['speed', 'timeinday', 'speed_y']].values
+    data_his = data_his.reshape(-1, num_nodes[dataset_name], 3)
+
+    # 0 is the latest observed sample.
     x_offsets = np.sort(
         np.concatenate((np.arange(-11, 1, 1),))
     )
+    # Predict the next one hour
     y_offsets = np.sort(np.arange(1, 13, 1))
     # x: (num_samples, input_length, num_nodes, input_dim)
     # y: (num_samples, output_length, num_nodes, output_dim)
-    x, y = generate_graph_seq2seq_io_data(
-        data,
+    x, y = generate_graph_seq2seq_io_data_with_his(
+        data_his,
         x_offsets=x_offsets,
-        y_offsets=y_offsets,
-        add_time_in_day=True,
-        add_day_in_week=False
+        y_offsets=y_offsets
     )
 
     print("x shape: ", x.shape, ", y shape: ", y.shape)
@@ -84,7 +131,7 @@ def generate_train_val_test(args):
     # for the rest: 7/8 is used for training, and 1/8 is used for validation.
     num_samples = x.shape[0]
     num_test = round(num_samples * 0.2)
-    num_train = round(num_samples * 0.7)
+    num_train = round(num_samples * 0.6)
     num_val = num_samples - num_test - num_train
 
     # train
@@ -96,16 +143,20 @@ def generate_train_val_test(args):
     )
     # test
     x_test, y_test = x[-num_test:], y[-num_test:]
+    print("Train Samples:", x_train.shape)
+    print("Val Samples:", x_val.shape)
+    print("Test Samples:", x_test.shape)
 
     for cat in ["train", "val", "test"]:
         _x, _y = locals()["x_" + cat], locals()["y_" + cat]
         print(cat, "x: ", _x.shape, "y:", _y.shape)
         np.savez_compressed(
-            os.path.join(args.output_dir, "%s.npz" % cat),
+            os.path.join(args.output_dir, "%shis.npz" % cat),
             x=_x,
             y=_y,
             x_offsets=x_offsets.reshape(list(x_offsets.shape) + [1]),
             y_offsets=y_offsets.reshape(list(y_offsets.shape) + [1]),
+
         )
 
 
@@ -116,8 +167,8 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset', type=str, choices=['PEMS04', 'PEMS08'], default='PEMS08', help='which dataset to run')
-    parser.add_argument("--output_dir", type=str, default="PEMS08/", help="Output directory.")
+    parser.add_argument('--dataset', type=str, choices=['PEMS03','PEMS04','PEMS07', 'PEMS08'], default='PEMS08', help='which dataset to run')
+    parser.add_argument("--output_dir", type=str, default="PEMS04/", help="Output directory.")
     parser.add_argument("--traffic_df_filename", type=str, default="{}/{}.npz", help="Raw traffic readings.")
     args = parser.parse_args()
     args.output_dir = f'{args.dataset}/'
