@@ -5,10 +5,10 @@ import math
 import numpy as np
 
 class AGCN(nn.Module):
-    def __init__(self, dim_in, dim_out, cheb_k):
+    def __init__(self, dim_in, dim_out, cheb_k, num_support):
         super(AGCN, self).__init__()
         self.cheb_k = cheb_k
-        self.weights = nn.Parameter(torch.FloatTensor(cheb_k*dim_in, dim_out)) # num_support*cheb_k*dim_in is the length of support
+        self.weights = nn.Parameter(torch.FloatTensor(num_support*cheb_k*dim_in, dim_out)) # num_support*cheb_k*dim_in is the length of support
         self.bias = nn.Parameter(torch.FloatTensor(dim_out))
         nn.init.xavier_normal_(self.weights)
         nn.init.constant_(self.bias, val=0)
@@ -28,17 +28,17 @@ class AGCN(nn.Module):
                     support_ks.append(torch.matmul(2 * support, support_ks[-1]) - support_ks[-2]) 
                 for graph in support_ks:
                     x_g.append(torch.einsum("bnm,bmc->bnc", graph, x))
-        x_g = torch.cat(x_g, dim=-1) # B, N, 2 * cheb_k * dim_in
+        x_g = torch.cat(x_g, dim=-1)
         x_gconv = torch.einsum('bni,io->bno', x_g, self.weights) + self.bias  # b, N, dim_out
         return x_gconv
     
 class AGCRNCell(nn.Module):
-    def __init__(self, node_num, dim_in, dim_out, cheb_k):
+    def __init__(self, node_num, dim_in, dim_out, cheb_k, num_support):
         super(AGCRNCell, self).__init__()
         self.node_num = node_num
         self.hidden_dim = dim_out
-        self.gate = AGCN(dim_in+self.hidden_dim, 2*dim_out, cheb_k)
-        self.update = AGCN(dim_in+self.hidden_dim, dim_out, cheb_k)
+        self.gate = AGCN(dim_in+self.hidden_dim, 2*dim_out, cheb_k, num_support)
+        self.update = AGCN(dim_in+self.hidden_dim, dim_out, cheb_k, num_support)
 
     def forward(self, x, state, supports):
         #x: B, num_nodes, input_dim
@@ -56,16 +56,16 @@ class AGCRNCell(nn.Module):
         return torch.zeros(batch_size, self.node_num, self.hidden_dim)
     
 class ADCRNN_Encoder(nn.Module):
-    def __init__(self, node_num, dim_in, dim_out, cheb_k, rnn_layers):
+    def __init__(self, node_num, dim_in, dim_out, cheb_k, rnn_layers, num_support):
         super(ADCRNN_Encoder, self).__init__()
         assert rnn_layers >= 1, 'At least one DCRNN layer in the Encoder.'
         self.node_num = node_num
         self.input_dim = dim_in
         self.rnn_layers = rnn_layers
         self.dcrnn_cells = nn.ModuleList()
-        self.dcrnn_cells.append(AGCRNCell(node_num, dim_in, dim_out, cheb_k))
+        self.dcrnn_cells.append(AGCRNCell(node_num, dim_in, dim_out, cheb_k, num_support))
         for _ in range(1, rnn_layers):
-            self.dcrnn_cells.append(AGCRNCell(node_num, dim_out, dim_out, cheb_k))
+            self.dcrnn_cells.append(AGCRNCell(node_num, dim_out, dim_out, cheb_k, num_support))
 
     def forward(self, x, init_state, supports):
         #shape of x: (B, T, N, D), shape of init_state: (rnn_layers, B, N, hidden_dim)
@@ -94,16 +94,16 @@ class ADCRNN_Encoder(nn.Module):
         return init_states
 
 class ADCRNN_Decoder(nn.Module):
-    def __init__(self, node_num, dim_in, dim_out, cheb_k, rnn_layers):
+    def __init__(self, node_num, dim_in, dim_out, cheb_k, rnn_layers, num_support):
         super(ADCRNN_Decoder, self).__init__()
         assert rnn_layers >= 1, 'At least one DCRNN layer in the Decoder.'
         self.node_num = node_num
         self.input_dim = dim_in
         self.rnn_layers = rnn_layers
         self.dcrnn_cells = nn.ModuleList()
-        self.dcrnn_cells.append(AGCRNCell(node_num, dim_in, dim_out, cheb_k))
+        self.dcrnn_cells.append(AGCRNCell(node_num, dim_in, dim_out, cheb_k, num_support))
         for _ in range(1, rnn_layers):
-            self.dcrnn_cells.append(AGCRNCell(node_num, dim_out, dim_out, cheb_k))
+            self.dcrnn_cells.append(AGCRNCell(node_num, dim_out, dim_out, cheb_k, num_support))
 
     def forward(self, xt, init_state, supports):
         # xt: (B, N, D)
@@ -148,17 +148,18 @@ class MDGCRNAdjHiDD(nn.Module):
         self.memory = self.construct_memory()
         
         # encoder
-        self.encoder = ADCRNN_Encoder(self.num_nodes, self.input_dim, self.rnn_units, self.cheb_k, self.rnn_layers)
+        self.adj_mx = adj_mx
+        self.encoder = ADCRNN_Encoder(self.num_nodes, self.input_dim, self.rnn_units, self.cheb_k, self.rnn_layers, len(self.adj_mx))
         
         # deocoder
         self.decoder_dim = self.rnn_units + self.mem_dim
-        self.decoder = ADCRNN_Decoder(self.num_nodes, self.output_dim + self.ycov_dim, self.decoder_dim, self.cheb_k, self.rnn_layers)
+        self.decoder = ADCRNN_Decoder(self.num_nodes, self.output_dim + self.ycov_dim, self.decoder_dim, self.cheb_k, self.rnn_layers, 1)
 
         # output
         self.proj = nn.Sequential(nn.Linear(self.decoder_dim, self.output_dim, bias=True))
         
         # graph
-        self.adj_mx = adj_mx
+
         self.hypernet = nn.Sequential(nn.Linear(self.decoder_dim*2, self.embed_dim, bias=True))
         
         self.act_dict = {'relu': nn.ReLU(), 'lrelu': nn.LeakyReLU(), 'sigmoid': nn.Sigmoid()}
