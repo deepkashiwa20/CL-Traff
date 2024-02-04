@@ -11,6 +11,31 @@ An implementation of CL-Traff under GCRN backbone.
 * 可以修改/添加上主程序文件的252行, 让程序支持 --dataset=PEMS03/PEMS04/PEMS07/PEMS08, 注意程序需要adj才能跑起来
 * 跑起来之后check PEMS03/PEMS04/PEMS07/PEMS08 的train/val/test 的number of samples, 确保是和所有benchmark设置一样的！
 
+#### 2024/02/05
+
+* Update PEMS0X dataset
+
+* Run following commands to prepare data:
+
+  ```bash
+  python generate_training_data_his_PEMS.py --dataset PEMS03
+  python generate_training_data_his_PEMS.py --dataset PEMS04
+  python generate_training_data_his_PEMS.py --dataset PEMS07
+  python generate_training_data_his_PEMS.py --dataset PEMS08
+  ```
+
+* Then train the model with following commands:
+
+  ```bash
+  cd model_MDGCRN
+  python traintorch_MDGCRNAdjHiDD.py --gpu 1 --dataset PEMS03
+  python traintorch_MDGCRNAdjHiDD.py --gpu 1 --dataset PEMS04
+  python traintorch_MDGCRNAdjHiDD.py --gpu 1 --dataset PEMS07
+  python traintorch_MDGCRNAdjHiDD.py --gpu 1 --dataset PEMS08
+  ```
+
+  
+
 #### Latest Release
 * 生成PEMS-BAY的数据 (Finish)
 * python generate_training_data_his_BAY.py
