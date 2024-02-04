@@ -65,10 +65,10 @@ def generate_train_val_test(args):
         "PEMS08": "2016-08-31 23:55:00",
     }
     train_dates = {
-        "PEMS03": "2018-12-25 14:25:00",
-        "PEMS04": "2018-02-05 09:35:00",
-        "PEMS07": "2017-06-28 19:10:00",
-        "PEMS08": "2016-08-07 04:50:00",
+        "PEMS03": "2018-11-11 23:55:00",
+        "PEMS04": "2018-02-16 23:55:00",
+        "PEMS07": "2017-07-17 23:55:00",
+        "PEMS08": "2016-08-18 23:55:00",
     }
     timeslots = pd.date_range(start_dates[dataset_name], end_dates[dataset_name], freq='5min')
     df.insert(0, 'timeslots', timeslots)
