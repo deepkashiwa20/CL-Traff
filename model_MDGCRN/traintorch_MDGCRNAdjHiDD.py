@@ -200,7 +200,7 @@ def traintest_model():
 
 #########################################################################################    
 parser = argparse.ArgumentParser()
-parser.add_argument('--dataset', type=str, choices=['METRLA', 'PEMSBAY'], default='METRLA', help='which dataset to run')
+parser.add_argument('--dataset', type=str, choices=['METRLA', 'PEMSBAY','PEMS03','PEMS04','PEMS07','PEMS08'], default='METRLA', help='which dataset to run')
 parser.add_argument('--trainval_ratio', type=float, default=0.8, help='the ratio of training and validation data among the total')
 parser.add_argument('--val_ratio', type=float, default=0.125, help='the ratio of validation data among the trainval ratio')
 parser.add_argument('--num_nodes', type=int, default=207, help='num_nodes')
@@ -238,7 +238,12 @@ parser.add_argument('--compact_loss', type=str, choices=['mse', 'rmse', 'mae'], 
 parser.add_argument('--detect_loss', type=str, choices=['mse', 'rmse', 'mae'], default='mae', help='which method to calculate detect loss')
 parser.add_argument("--use_mask", type=eval, choices=[True, False], default='False', help="use mask to calculate detect loss")
 args = parser.parse_args()
-        
+num_nodes_dict={
+    "PEMS03": 358,
+    "PEMS04": 307,
+    "PEMS07": 883,
+    "PEMS08": 170,
+}
 if args.dataset == 'METRLA':
     data_path = f'../{args.dataset}/metr-la.h5'
     adj_mx_path = f'../{args.dataset}/adj_mx.pkl'
@@ -250,7 +255,12 @@ elif args.dataset == 'PEMSBAY':
     args.cl_decay_steps = 8000
     args.steps = [10, 150]
 else:
-    pass # including more datasets in the future    
+    data_path = f'../{args.dataset}/{args.dataset}.npz'
+    adj_mx_path = f'../{args.dataset}/adj_{args.dataset}_distance.pkl'
+    args.num_nodes = num_nodes_dict[args.dataset]
+    args.cl_decay_steps = 8000
+    args.val_ratio=0.25
+    args.steps = [10, 150]
 
 model_name = 'MDGCRNAdjHiDD'
 timestring = time.strftime('%Y%m%d%H%M%S', time.localtime())
