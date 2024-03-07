@@ -153,23 +153,23 @@ class MDGCRNAdjHiDD(nn.Module):
         if self.use_STE:
             # projection
             self.input_proj = nn.Linear(self.input_dim, self.rnn_units)
-            self.node_embedding = nn.Parameter(torch.empty(self.num_nodes, self.embed_dim))
+            # self.node_embedding = nn.Parameter(torch.empty(self.num_nodes, self.embed_dim))
             self.time_embedding = nn.Parameter(torch.empty(self.TDAY, self.embed_dim))
-            nn.init.xavier_uniform_(self.node_embedding)
+            # nn.init.xavier_uniform_(self.node_embedding)
             nn.init.xavier_uniform_(self.time_embedding)
             
         
         # encoder
         self.adj_mx = adj_mx
         if self.use_STE:
-            self.encoder = ADCRNN_Encoder(self.num_nodes, self.rnn_units + self.embed_dim * 2, self.rnn_units, self.cheb_k, self.rnn_layers, len(self.adj_mx))
+            self.encoder = ADCRNN_Encoder(self.num_nodes, self.rnn_units + self.embed_dim * 1, self.rnn_units, self.cheb_k, self.rnn_layers, len(self.adj_mx))
         else:
             self.encoder = ADCRNN_Encoder(self.num_nodes, self.input_dim, self.rnn_units, self.cheb_k, self.rnn_layers, len(self.adj_mx))
         
         # deocoder
         self.decoder_dim = self.rnn_units + self.mem_dim
         if self.use_STE:
-            self.decoder = ADCRNN_Decoder(self.num_nodes, self.rnn_units + self.embed_dim * 2, self.decoder_dim, self.cheb_k, self.rnn_layers, 1)
+            self.decoder = ADCRNN_Decoder(self.num_nodes, self.rnn_units + self.embed_dim * 1, self.decoder_dim, self.cheb_k, self.rnn_layers, 1)
         else:
             self.decoder = ADCRNN_Decoder(self.num_nodes, self.output_dim + self.ycov_dim, self.decoder_dim, self.cheb_k, self.rnn_layers, 1)
 
@@ -223,9 +223,10 @@ class MDGCRNAdjHiDD(nn.Module):
     def forward(self, x, x_cov, x_his, y_cov, labels=None, batches_seen=None):
         if self.use_STE:
             x = self.input_proj(x)  # [B,T,N,1]->[B,T,N,D]
-            node_emb = self.node_embedding.unsqueeze(0).unsqueeze(1).expand(x.shape[0], self.horizon, -1, -1)  # [B,T,N,d]
+            # node_emb = self.node_embedding.unsqueeze(0).unsqueeze(1).expand(x.shape[0], self.horizon, -1, -1)  # [B,T,N,d]
             time_emb = self.time_embedding[(x_cov.squeeze() * self.TDAY).type(torch.LongTensor)]  # [B, T, N, d]
-            x = torch.cat([x, node_emb, time_emb], dim=-1)  # [B, T, N, D+2d]
+            # x = torch.cat([x, node_emb, time_emb], dim=-1)  # [B, T, N, D+2d]
+            x = torch.cat([x, time_emb], dim=-1)  # [B, T, N, D+d]
         supports_en = self.adj_mx
         init_state = self.encoder.init_hidden(x.shape[0])
         h_en, state_en = self.encoder(x, init_state, supports_en) # B, T, N, hidden
@@ -235,9 +236,10 @@ class MDGCRNAdjHiDD(nn.Module):
         # TODO: for x_his
         if self.use_STE:
             x_his = self.input_proj(x_his)  # [B,T,N,1]->[B,T,N,D]
-            node_emb = self.node_embedding.unsqueeze(0).unsqueeze(1).expand(x.shape[0], self.horizon, -1, -1)  # [B,T,N,d]
+            # node_emb = self.node_embedding.unsqueeze(0).unsqueeze(1).expand(x.shape[0], self.horizon, -1, -1)  # [B,T,N,d]
             time_emb = self.time_embedding[(x_cov.squeeze() * self.TDAY).type(torch.LongTensor)]  # [B, T, N, d]
-            x_his = torch.cat([x_his, node_emb, time_emb], dim=-1)  # [B, T, N, D+2d]
+            # x_his = torch.cat([x_his, node_emb, time_emb], dim=-1)  # [B, T, N, D+2d]
+            x_his = torch.cat([x_his, time_emb], dim=-1)  # [B, T, N, D+d]
         h_his_en, state_his_en = self.encoder(x_his, init_state, supports_en) # B, T, N, hidden
         h_his_t = h_his_en[:, -1, :, :] # B, N, hidden (last state)      
         h_his_att, query_his, pos_his, neg_his, mask_his = self.query_memory(h_his_t)
@@ -260,7 +262,7 @@ class MDGCRNAdjHiDD(nn.Module):
         
         node_embeddings = self.hypernet(h_aug) # B, N, e
         support = F.softmax(F.relu(torch.einsum('bnc,bmc->bnm', node_embeddings, node_embeddings)), dim=-1) 
-        supports_de = [support]
+        supports_de = [support] 
         
         ht_list = [h_de]*self.rnn_layers
         go = torch.zeros((x.shape[0], self.num_nodes, self.output_dim), device=x.device)
@@ -269,9 +271,10 @@ class MDGCRNAdjHiDD(nn.Module):
         for t in range(self.horizon):
             if self.use_STE:
                 go = self.input_proj(go)  # equal to torch.zeros(B,N,D)
-                node_emb = self.node_embedding.unsqueeze(0).expand(x.shape[0], -1, -1)  # [B,N,d]
+                # node_emb = self.node_embedding.unsqueeze(0).expand(x.shape[0], -1, -1)  # [B,N,d]
                 time_emb = self.time_embedding[(y_cov[:, t, ...].squeeze() * self.TDAY).type(torch.LongTensor)]  # [B, N, d]
-                go = torch.cat([go, node_emb, time_emb], dim=-1)  # [B, N, D+2d]
+                # go = torch.cat([go, node_emb, time_emb], dim=-1)  # [B, N, D+2d]
+                go = torch.cat([go, time_emb], dim=-1)  # [B, N, D+d]
                 h_de, ht_list = self.decoder(go, ht_list, supports_de)
             else:
                 h_de, ht_list = self.decoder(torch.cat([go, y_cov[:, t, ...]], dim=-1), ht_list, supports_de)

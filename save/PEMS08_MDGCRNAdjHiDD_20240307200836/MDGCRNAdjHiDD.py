@@ -169,16 +169,16 @@ class MDGCRNAdjHiDD(nn.Module):
         # deocoder
         self.decoder_dim = self.rnn_units + self.mem_dim
         if self.use_STE:
-            self.decoder = ADCRNN_Decoder(self.num_nodes, self.rnn_units + self.embed_dim * 2, self.decoder_dim, self.cheb_k, self.rnn_layers, 1)
+            self.decoder = ADCRNN_Decoder(self.num_nodes, self.rnn_units + self.embed_dim * 2, self.decoder_dim, self.cheb_k, self.rnn_layers, 2)
         else:
-            self.decoder = ADCRNN_Decoder(self.num_nodes, self.output_dim + self.ycov_dim, self.decoder_dim, self.cheb_k, self.rnn_layers, 1)
+            self.decoder = ADCRNN_Decoder(self.num_nodes, self.output_dim + self.ycov_dim, self.decoder_dim, self.cheb_k, self.rnn_layers, 2)
 
         # output
         self.proj = nn.Sequential(nn.Linear(self.decoder_dim, self.output_dim, bias=True))
         
-        # graph
-
-        self.hypernet = nn.Sequential(nn.Linear(self.decoder_dim*2, self.embed_dim, bias=True))
+        self.hypernet = nn.Sequential(nn.Linear(self.decoder_dim, self.embed_dim, bias=True))
+        self.hypernet_his = nn.Sequential(nn.Linear(self.decoder_dim, self.embed_dim, bias=True))
+        self.fusion = nn.Sequential(nn.Linear(self.decoder_dim*2, self.decoder_dim, bias=True))
         
         self.act_dict = {'relu': nn.ReLU(), 'lrelu': nn.LeakyReLU(), 'sigmoid': nn.Sigmoid()}
         self.act_fn = 'sigmoid'  # 'relu' 'lrelu' 'sigmoid'
@@ -256,11 +256,16 @@ class MDGCRNAdjHiDD(nn.Module):
         mask = torch.cat([mask, mask_his], dim=0) if mask is not None else None
         
         h_de = torch.cat([h_t, h_att], dim=-1)
-        h_aug = torch.cat([h_t, h_att, h_his_t, h_his_att], dim=-1) # B, N, D
+        # h_aug = torch.cat([h_t, h_att, h_his_t, h_his_att], dim=-1) # B, N, D
+        h_aug = torch.cat([h_his_t, h_his_att], dim=-1) # B, N, D
         
-        node_embeddings = self.hypernet(h_aug) # B, N, e
+        node_embeddings = self.hypernet(h_de) # B, N, e
         support = F.softmax(F.relu(torch.einsum('bnc,bmc->bnm', node_embeddings, node_embeddings)), dim=-1) 
-        supports_de = [support]
+        node_embeddings_his = self.hypernet_his(h_aug) # B, N, e
+        support_his = F.softmax(F.relu(torch.einsum('bnc,bmc->bnm', node_embeddings_his, node_embeddings_his)), dim=-1) 
+        supports_de = [support, support_his]
+        
+        h_de = self.fusion(torch.cat([h_de, h_aug], dim=-1))
         
         ht_list = [h_de]*self.rnn_layers
         go = torch.zeros((x.shape[0], self.num_nodes, self.output_dim), device=x.device)

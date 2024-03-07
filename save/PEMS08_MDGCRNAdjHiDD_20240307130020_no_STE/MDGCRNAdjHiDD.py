@@ -260,7 +260,7 @@ class MDGCRNAdjHiDD(nn.Module):
         
         node_embeddings = self.hypernet(h_aug) # B, N, e
         support = F.softmax(F.relu(torch.einsum('bnc,bmc->bnm', node_embeddings, node_embeddings)), dim=-1) 
-        supports_de = [support]
+        supports_de = [support] 
         
         ht_list = [h_de]*self.rnn_layers
         go = torch.zeros((x.shape[0], self.num_nodes, self.output_dim), device=x.device)

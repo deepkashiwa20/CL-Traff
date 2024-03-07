@@ -259,10 +259,9 @@ else:
     data_path = f'../{args.dataset}/{args.dataset}.npz'
     adj_mx_path = f'../{args.dataset}/adj_{args.dataset}_distance.pkl'
     args.num_nodes = num_nodes_dict[args.dataset]
-    # args.cl_decay_steps = 8000
-    # args.val_ratio=0.25
-    # args.steps = [10, 150]
-    args.steps = [100]
+    args.cl_decay_steps = 8000
+    args.val_ratio=0.25
+    args.steps = [10, 150]
 
 model_name = 'MDGCRNAdjHiDD'
 timestring = time.strftime('%Y%m%d%H%M%S', time.localtime())
