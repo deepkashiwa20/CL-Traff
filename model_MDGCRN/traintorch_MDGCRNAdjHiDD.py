@@ -57,7 +57,7 @@ def get_model():
     model = MDGCRNAdjHiDD(num_nodes=args.num_nodes, input_dim=args.input_dim, output_dim=args.output_dim, horizon=args.horizon, 
                  rnn_units=args.rnn_units, rnn_layers=args.rnn_layers, cheb_k = args.max_diffusion_step, mem_num=args.mem_num, 
                  mem_dim=args.mem_dim, embed_dim=args.embed_dim, adj_mx = adjs, cl_decay_steps=args.cl_decay_steps, use_curriculum_learning=args.use_curriculum_learning, 
-                 contra_loss=args.contra_loss, diff_max=diff_max, diff_min=diff_min, use_mask=args.use_mask, device=device).to(device)
+                 contra_loss=args.contra_loss, diff_max=diff_max, diff_min=diff_min, use_mask=args.use_mask, use_STE=args.use_STE, device=device).to(device)
     return model
 
 def prepare_x_y(x, y):
@@ -237,6 +237,7 @@ parser.add_argument('--contra_loss', type=str, choices=['triplet', 'infonce'], d
 parser.add_argument('--compact_loss', type=str, choices=['mse', 'rmse', 'mae'], default='mse', help='which method to calculate compact loss')
 parser.add_argument('--detect_loss', type=str, choices=['mse', 'rmse', 'mae'], default='mae', help='which method to calculate detect loss')
 parser.add_argument("--use_mask", type=eval, choices=[True, False], default='False', help="use mask to calculate detect loss")
+parser.add_argument("--use_STE", type=eval, choices=[True, False], default='True', help="use spatio-temporal embedding")
 args = parser.parse_args()
 num_nodes_dict={
     "PEMS03": 358,
