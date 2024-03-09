@@ -120,7 +120,7 @@ def evaluate(model, mode):
 def traintest_model():  
     model = get_model()
     print_model(model)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, eps=args.epsilon, weight_decay=args.weight_decay)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, eps=args.epsilon)
     lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.steps, gamma=args.lr_decay_ratio)
     min_val_loss = float('inf')
     wait = 0
@@ -221,7 +221,6 @@ parser.add_argument("--batch_size", type=int, default=64, help="size of the batc
 parser.add_argument("--lr", type=float, default=0.01, help="base learning rate")
 parser.add_argument("--steps", type=eval, default=[50, 100], help="steps")
 parser.add_argument("--lr_decay_ratio", type=float, default=0.1, help="lr_decay_ratio")
-parser.add_argument("--weight_decay", type=float, default=0, help="weight_decay_ratio")
 parser.add_argument("--epsilon", type=float, default=1e-3, help="optimizer epsilon")
 parser.add_argument("--max_grad_norm", type=int, default=5, help="max_grad_norm")
 parser.add_argument("--use_curriculum_learning", type=eval, choices=[True, False], default='True', help="use_curriculum_learning")
