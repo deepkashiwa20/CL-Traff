@@ -14,7 +14,7 @@ import logging
 from utils import StandardScaler, masked_mae_loss, masked_mape_loss, masked_mse_loss, masked_rmse_loss
 from utils import load_adj
 from metrics import RMSE, MAE, MSE
-from MDGCRNHiDD import MDGCRNHiDD
+from MDGCRNAdjHiDD import MDGCRNAdjHiDD
 
 class ContrastiveLoss():
     def __init__(self, contra_loss='triplet', mask=None, temp=1.0, margin=1.0):
@@ -53,11 +53,14 @@ def print_model(model):
 
 def get_model():
     adj_mx = load_adj(adj_mx_path, args.adj_type)
+    if args.dataset == "PEMS08":
+        adj_mx_path_l = adj_mx_path.replace("distance", "learned")
+        adj_mx += load_adj(adj_mx_path_l, args.adj_type)
     adjs = [torch.tensor(i).to(device) for i in adj_mx]            
-    model = MDGCRNHiDD(num_nodes=args.num_nodes, input_dim=args.input_dim, output_dim=args.output_dim, horizon=args.horizon, 
+    model = MDGCRNAdjHiDD(num_nodes=args.num_nodes, input_dim=args.input_dim, output_dim=args.output_dim, horizon=args.horizon, 
                  rnn_units=args.rnn_units, rnn_layers=args.rnn_layers, cheb_k = args.max_diffusion_step, mem_num=args.mem_num, 
                  mem_dim=args.mem_dim, embed_dim=args.embed_dim, adj_mx = adjs, cl_decay_steps=args.cl_decay_steps, use_curriculum_learning=args.use_curriculum_learning, 
-                 contra_loss=args.contra_loss, diff_max=diff_max, diff_min=diff_min, use_mask=args.use_mask, device=device).to(device)
+                 contra_loss=args.contra_loss, diff_max=diff_max, diff_min=diff_min, use_mask=args.use_mask, use_STE=args.use_STE, device=device).to(device)
     return model
 
 def prepare_x_y(x, y):
@@ -120,7 +123,7 @@ def evaluate(model, mode):
 def traintest_model():  
     model = get_model()
     print_model(model)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, eps=args.epsilon)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, eps=args.epsilon, weight_decay=args.weight_decay)
     lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.steps, gamma=args.lr_decay_ratio)
     min_val_loss = float('inf')
     wait = 0
@@ -150,14 +153,15 @@ def traintest_model():
             loss_c = compact_loss(query, pos.detach())
             
             if args.detect_loss == 'mse':
-                detect_loss = MSE
+                detect_loss = nn.MSELoss()
             elif args.detect_loss == 'rmse':
                 detect_loss = RMSE
             elif args.detect_loss == 'mae':
-                detect_loss = MAE
+                detect_loss = nn.L1Loss()
             else:
                 pass
-            loss_d = detect_loss(real_dis, latent_dis, mask=mask_dis)
+            # loss_d = detect_loss(real_dis, latent_dis, mask=mask_d)
+            loss_d = detect_loss(real_dis, latent_dis)
             loss = mae_loss + args.lamb * u_loss + args.lamb1 * loss_c + args.lamb2 * loss_d
             losses.append(loss.item())
             mae_losses.append(mae_loss.item())
@@ -188,17 +192,18 @@ def traintest_model():
         elif val_loss >= min_val_loss:
             wait += 1
             if wait == args.patience:
-                logger.info('Early stopping at epoch: %d' % epoch_num)
+                logger.info('Early stopping at epoch: %d' % (epoch_num + 1))
                 break
     
-    logger.info('=' * 35 + 'Best model performance' + '=' * 35)
+    logger.info('=' * 35 + 'Best val_loss model performance' + '=' * 35)
+    logger.info('=' * 22 + 'Better results might be found from model at different epoch' + '=' * 22)
     model = get_model()
     model.load_state_dict(torch.load(modelpt_path))
     test_loss, _, _ = evaluate(model, 'test')
 
 #########################################################################################    
 parser = argparse.ArgumentParser()
-parser.add_argument('--dataset', type=str, choices=['METRLA', 'PEMSBAY'], default='METRLA', help='which dataset to run')
+parser.add_argument('--dataset', type=str, choices=['METRLA', 'PEMSBAY','PEMS03','PEMS04','PEMS07','PEMS08'], default='METRLA', help='which dataset to run')
 parser.add_argument('--trainval_ratio', type=float, default=0.8, help='the ratio of training and validation data among the total')
 parser.add_argument('--val_ratio', type=float, default=0.125, help='the ratio of validation data among the trainval ratio')
 parser.add_argument('--num_nodes', type=int, default=207, help='num_nodes')
@@ -219,6 +224,7 @@ parser.add_argument("--batch_size", type=int, default=64, help="size of the batc
 parser.add_argument("--lr", type=float, default=0.01, help="base learning rate")
 parser.add_argument("--steps", type=eval, default=[50, 100], help="steps")
 parser.add_argument("--lr_decay_ratio", type=float, default=0.1, help="lr_decay_ratio")
+parser.add_argument("--weight_decay", type=float, default=0, help="weight_decay_ratio")
 parser.add_argument("--epsilon", type=float, default=1e-3, help="optimizer epsilon")
 parser.add_argument("--max_grad_norm", type=int, default=5, help="max_grad_norm")
 parser.add_argument("--use_curriculum_learning", type=eval, choices=[True, False], default='True', help="use_curriculum_learning")
@@ -235,8 +241,14 @@ parser.add_argument('--contra_loss', type=str, choices=['triplet', 'infonce'], d
 parser.add_argument('--compact_loss', type=str, choices=['mse', 'rmse', 'mae'], default='mse', help='which method to calculate compact loss')
 parser.add_argument('--detect_loss', type=str, choices=['mse', 'rmse', 'mae'], default='mae', help='which method to calculate detect loss')
 parser.add_argument("--use_mask", type=eval, choices=[True, False], default='False', help="use mask to calculate detect loss")
+parser.add_argument("--use_STE", type=eval, choices=[True, False], default='True', help="use spatio-temporal embedding")
 args = parser.parse_args()
-        
+num_nodes_dict={
+    "PEMS03": 358,
+    "PEMS04": 307,
+    "PEMS07": 883,
+    "PEMS08": 170,
+}
 if args.dataset == 'METRLA':
     data_path = f'../{args.dataset}/metr-la.h5'
     adj_mx_path = f'../{args.dataset}/adj_mx.pkl'
@@ -245,8 +257,16 @@ elif args.dataset == 'PEMSBAY':
     data_path = f'../{args.dataset}/pems-bay.h5'
     adj_mx_path = f'../{args.dataset}/adj_mx_bay.pkl'
     args.num_nodes = 325
+    args.cl_decay_steps = 8000
+    args.steps = [10, 150]
 else:
-    pass # including more datasets in the future    
+    data_path = f'../{args.dataset}/{args.dataset}.npz'
+    adj_mx_path = f'../{args.dataset}/adj_{args.dataset}_distance.pkl'
+    args.num_nodes = num_nodes_dict[args.dataset]
+    # args.cl_decay_steps = 8000
+    # args.val_ratio=0.25
+    # args.steps = [10, 150]
+    args.steps = [100]
 
 model_name = 'MDGCRNAdjHiDD'
 timestring = time.strftime('%Y%m%d%H%M%S', time.localtime())
@@ -277,32 +297,6 @@ console.setLevel(logging.INFO)
 console.setFormatter(formatter)
 logger.addHandler(handler)
 logger.addHandler(console)
-
-# logger.info('model', model_name)
-# logger.info('dataset', args.dataset)
-# logger.info('trainval_ratio', args.trainval_ratio)
-# logger.info('val_ratio', args.val_ratio)
-# logger.info('num_nodes', args.num_nodes)
-# logger.info('seq_len', args.seq_len)
-# logger.info('horizon', args.horizon)
-# logger.info('input_dim', args.input_dim)
-# logger.info('output_dim', args.output_dim)
-# logger.info('rnn_layers', args.rnn_layers)
-# logger.info('rnn_units', args.rnn_units)
-# logger.info('embed_dim', args.embed_dim)
-# logger.info('max_diffusion_step', args.max_diffusion_step)
-# logger.info('adj_type', args.adj_type)
-# logger.info('loss', args.loss)
-# logger.info('batch_size', args.batch_size)
-# logger.info('epochs', args.epochs)
-# logger.info('patience', args.patience)
-# logger.info('lr', args.lr)
-# logger.info('epsilon', args.epsilon)
-# logger.info('steps', args.steps)
-# logger.info('lr_decay_ratio', args.lr_decay_ratio)
-# logger.info('use_curriculum_learning', args.use_curriculum_learning)
-# logger.info('cl_decay_steps', args.cl_decay_steps)
-
 message = ''.join([f'{k}: {v}\n' for k, v in vars(args).items()])
 logger.info(message)
 
