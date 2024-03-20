@@ -263,7 +263,10 @@ else:
     # args.cl_decay_steps = 8000
     # args.val_ratio=0.25
     # args.steps = [10, 150]
-    args.steps = [100]
+    if args.dataset == "PEMS08":
+        args.steps = [100]
+    if args.dataset == "PEMS04":
+        args.steps = [0, 150]
 
 model_name = 'MDGCRNAdjHiDD'
 timestring = time.strftime('%Y%m%d%H%M%S', time.localtime())
