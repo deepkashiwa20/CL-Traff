@@ -256,15 +256,20 @@ elif args.dataset == 'PEMSBAY':
     args.num_nodes = 325
     args.cl_decay_steps = 8000
     args.steps = [10, 150]
-else:
+elif args.dataset == 'PEMS04':
     data_path = f'../{args.dataset}/{args.dataset}.npz'
     adj_mx_path = f'../{args.dataset}/adj_{args.dataset}_distance.pkl'
     args.num_nodes = num_nodes_dict[args.dataset]
-    # args.cl_decay_steps = 8000
-    # args.val_ratio=0.25
-    # args.steps = [10, 150]
     args.steps = [100]
-
+    # rnn_units = 32 #optimal
+elif args.dataset == 'PEMS08':
+    data_path = f'../{args.dataset}/{args.dataset}.npz'
+    adj_mx_path = f'../{args.dataset}/adj_{args.dataset}_distance.pkl'
+    args.num_nodes = num_nodes_dict[args.dataset]
+    args.steps = [100]
+    # rnn_units = 16 #optimal
+    # args.lamb2 = 1.5 #optimal
+    
 model_name = 'MDGCRNAdjHiDD'
 timestring = time.strftime('%Y%m%d%H%M%S', time.localtime())
 path = f'../save/{args.dataset}_{model_name}_{timestring}'
