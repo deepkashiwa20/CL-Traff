@@ -231,7 +231,7 @@ def calculate_scaled_laplacian(adj_mx, lambda_max=2, undirected=True):
     return L.astype(np.float32)
 
 def load_adj(pkl_filename, adjtype):
-    if "PEMS0" in pkl_filename:
+    if "PEMS0" or "D7" in pkl_filename:
         adj_mx = load_pickle(pkl_filename)
     else:
         sensor_ids, sensor_id_to_ind, adj_mx = load_pickle(pkl_filename)

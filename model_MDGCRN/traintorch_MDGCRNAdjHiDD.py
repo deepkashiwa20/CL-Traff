@@ -200,7 +200,7 @@ def traintest_model():
 
 #########################################################################################    
 parser = argparse.ArgumentParser()
-parser.add_argument('--dataset', type=str, choices=['METRLA', 'PEMSBAY','PEMS03','PEMS04','PEMS07','PEMS08'], default='METRLA', help='which dataset to run')
+parser.add_argument('--dataset', type=str, choices=['METRLA', 'PEMSBAY','PEMS03','PEMS04','PEMS07','PEMS08','PEMSD7L','PEMSD7M'], default='METRLA', help='which dataset to run')
 parser.add_argument('--trainval_ratio', type=float, default=0.8, help='the ratio of training and validation data among the total')
 parser.add_argument('--val_ratio', type=float, default=0.125, help='the ratio of validation data among the trainval ratio')
 parser.add_argument('--num_nodes', type=int, default=207, help='num_nodes')
@@ -245,6 +245,8 @@ num_nodes_dict={
     "PEMS04": 307,
     "PEMS07": 883,
     "PEMS08": 170,
+    "PEMSD7L": 1026,
+    "PEMSD7M": 228,
 }
 if args.dataset == 'METRLA':
     data_path = f'../{args.dataset}/metr-la.h5'
@@ -269,6 +271,12 @@ elif args.dataset == 'PEMS08':
     args.steps = [100]
     # rnn_units = 16 #optimal
     # args.lamb2 = 1.5 #optimal
+else: # For PEMS03, PEMSD7L, PEMSD7M, and PEMS08, temporarily
+    data_path = f'../{args.dataset}/{args.dataset}.npz'
+    adj_mx_path = f'../{args.dataset}/adj_{args.dataset}_distance.pkl'
+    args.num_nodes = num_nodes_dict[args.dataset]
+    args.steps = [100]
+
     
 model_name = 'MDGCRNAdjHiDD'
 timestring = time.strftime('%Y%m%d%H%M%S', time.localtime())
