@@ -1,6 +1,29 @@
 # CL-Traff
 An implementation of CL-Traff under GCRN backbone.
 
+#### 2024/05/15
+
+* Update PEMSD7L and PEMSD7M datasets
+
+* Run following commands to prepare data:
+
+  ```bash
+  python generate_training_data_his_D7.py --dataset PEMSD7L
+  python generate_training_data_his_D7.py --dataset PEMSD7M
+  ```
+
+* Then train the model with following commands:
+
+  ```bash
+  cd model_MDGCRN
+  python traintorch_MDGCRNAdjHiDD.py --gpu 1 --dataset PEMSD7L
+  python traintorch_MDGCRNAdjHiDD.py --gpu 1 --dataset PEMSD7M
+  ```
+
+  
+
+
+
 #### 2024/04/19
 The newest results are as follows:
 ![画像1](https://github.com/deepkashiwa20/CL-Traff/assets/54202779/cd76656f-cd5d-4c5d-92a8-4cc48ed04a44)
