@@ -74,15 +74,15 @@ def generate_train_val_test(args):
     df.insert(0, 'timeslots', timeslots)
     df_new = df.set_index('timeslots', drop=True, append=False, inplace=False, verify_integrity=False)
 
-    timeslots = pd.date_range('2017-01-01 00:00:00', '2017-06-30 23:55:00', freq='5min')
-    print(len(timeslots))
-    days = pd.date_range('2017-01-01 00:00:00', '2017-06-30 23:55:00', freq='1D')
-    print(len(days), 0.8 * len(days))
-    train_days = pd.date_range('2017-01-01 00:00:00', '2017-05-24 23:55:00', freq='1D')
-    print(len(train_days))
+    # timeslots = pd.date_range(start_dates[dataset_name], end_dates[dataset_name], freq='5min')
+    # print(len(timeslots))
+    # days = pd.date_range(start_dates[dataset_name], end_dates[dataset_name], freq='1D')
+    # print(len(days), 0.8 * len(days))
+    # train_days = pd.date_range(start_dates[dataset_name], train_dates[dataset_name], freq='1D')
+    # print(len(train_days))
     # print(len(timeslots), timeslots[0], timeslots[-1])
     data = df_new.stack().reset_index()
-    data.columns = ['timestamp', 'sensorid', 'speed']
+    data.columns = ['timestamp', 'sensorid', 'flow']
     data['timeinday'] = (data['timestamp'].values - data['timestamp'].values.astype("datetime64[D]")) / np.timedelta64(
         1, "D")
     data['timestamp'] = pd.to_datetime(data['timestamp'])
@@ -90,13 +90,13 @@ def generate_train_val_test(args):
                 data['timestamp'].dt.hour * 60 + data['timestamp'].dt.minute) // 5
 
     df_train = data[(data.timestamp >= start_dates[dataset_name]) & (data.timestamp <= train_dates[dataset_name])]
-    df_train = df_train[['sensorid', 'weekdaytime', 'speed']]
+    df_train = df_train[['sensorid', 'weekdaytime', 'flow']]
 
     def get_mean_without_null_values(data, null_val=0.):
         return data[data != null_val].mean()
 
     df_train_avg = df_train.groupby(['sensorid', 'weekdaytime']).aggregate(
-        {'speed': get_mean_without_null_values}).reset_index()
+        {'flow': get_mean_without_null_values}).reset_index()
 
     data_his = pd.merge(data, df_train_avg, on=['sensorid', 'weekdaytime'], suffixes=(None, '_y'))
 
@@ -104,11 +104,11 @@ def generate_train_val_test(args):
     timeslices = df_new.index
     mux = pd.MultiIndex.from_product([timeslices, sensorid_list], names=['timestamp', 'sensorid'])
     data_his = data_his.set_index(['timestamp', 'sensorid']).reindex(mux).reset_index()
-    data_his = data_his[['timestamp', 'sensorid', 'speed', 'timeinday', 'speed_y']]
+    data_his = data_his[['timestamp', 'sensorid', 'flow', 'timeinday', 'flow_y']]
 
-    print(np.array_equal(data_his['speed'].values.reshape(-1, num_nodes[dataset_name]), df_new.values))
+    print(np.array_equal(data_his['flow'].values.reshape(-1, num_nodes[dataset_name]), df_new.values))
 
-    data_his = data_his[['speed', 'timeinday', 'speed_y']].values
+    data_his = data_his[['flow', 'timeinday', 'flow_y']].values
     data_his = data_his.reshape(-1, num_nodes[dataset_name], 3)
 
     # 0 is the latest observed sample.
