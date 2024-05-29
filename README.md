@@ -1,7 +1,8 @@
 # CL-Traff
 An implementation of CL-Traff under GCRN backbone.
 #### 2024/05/29
-Update load adj bug for PEMS0X, doesn't affect the results.
+Fix a load adj bug for PEMS0X, doesn't affect the results.
+Only appear after the D7 version, already fix now.
 
 #### 2024/05/15
 
