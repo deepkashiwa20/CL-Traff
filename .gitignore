@@ -23,3 +23,9 @@ METRLA/*.npz
 PEMSBAY/*.npz
 PEMS04/*.npz
 PEMS08/*.npz
+
+__pycache__/
+logs/
+save/
+*.npz
+PEMS-BAY.h5

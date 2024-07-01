@@ -119,10 +119,10 @@ class ADCRNN_Decoder(nn.Module):
 
 
 class MDGCRNAdjHiDD(nn.Module):
-    def __init__(self, num_nodes, input_dim, output_dim, horizon, rnn_units, rnn_layers=1, cheb_k=3,
+    def __init__(self, num_nodes=207, input_dim=1, output_dim=1, horizon=12, rnn_units=128, rnn_layers=1, cheb_k=3,
                  ycov_dim=1, mem_num=20, mem_dim=64, embed_dim=10, adj_mx=None, cl_decay_steps=2000, 
-                 use_curriculum_learning=True, contra_loss='triplet', diff_max=3.74, diff_min=0, 
-                 use_mask=False, use_STE=True, device="cpu"):
+                 use_curriculum_learning=True, contra_loss='infonce', diff_max=3.74, diff_min=0, 
+                 use_mask=False, use_STE=False, device="cpu"):
         super(MDGCRNAdjHiDD, self).__init__()
         self.num_nodes = num_nodes
         self.input_dim = input_dim
@@ -205,6 +205,15 @@ class MDGCRNAdjHiDD(nn.Module):
             mask_index = ind[:, :, [0]]  # B, N, 1
             mask = torch.zeros_like(att_score, dtype=torch.bool).to(att_score.device)  # B, N, M
             mask = mask.scatter(-1, mask_index, True)  
+            # # idx has shape (n, m)
+            # # val has shape (n, m, d)
+            # for i in range(n):
+            #     for j in range(m):
+            #         cur_index=idx[n, m]
+            #         val[n, m, cur_index]=1
+            # Ans:
+            # b, n=ind.shape
+            # mask[torch.arange(b)[:, None], torch.arange(n), ind]=1
         elif self.contra_loss in ['triplet']:  # Triplet loss
             neg = self.memory['Memory'][ind[:, :, 1]] # B, N, d
             mask = None
@@ -214,7 +223,7 @@ class MDGCRNAdjHiDD(nn.Module):
     
     def calculate_cosine(self, pos, pos_his, use_mask=False, mask=None):
         # score = F.cosine_similarity(pos, pos_his, dim=-1)  # B, N
-        score = torch.sum(torch.square(pos - pos_his), dim=-1)
+        score = torch.sum(torch.abs(pos - pos_his), dim=-1)
         return score, mask
         if use_mask:  #* add mask
             mask = (torch.mean(pos.eq(pos_his).float(), dim=-1) < 1).int()  # True means anomoly
@@ -230,7 +239,7 @@ class MDGCRNAdjHiDD(nn.Module):
         init_state = self.encoder.init_hidden(x.shape[0])
         h_en, state_en = self.encoder(x, init_state, supports_en) # B, T, N, hidden
         h_t = h_en[:, -1, :, :] # B, N, hidden (last state)    
-        h_att, query, pos, neg, mask = self.query_memory(h_t)    
+        h_att, query, pos, neg, mask = self.query_memory(h_t)
         
         # TODO: for x_his
         if self.use_STE:
@@ -250,10 +259,10 @@ class MDGCRNAdjHiDD(nn.Module):
         latent_dis = self.act_dict.get(self.act_fn)(latent_dis)
         
         # TODO: for additional query, pos, neg, mask
-        query = torch.cat([query, query_his], dim=0)
-        pos = torch.cat([pos, pos_his], dim=0)
-        neg = torch.cat([neg, neg_his], dim=0)
-        mask = torch.cat([mask, mask_his], dim=0) if mask is not None else None
+        query = torch.stack([query, query_his], dim=0)
+        pos = torch.stack([pos, pos_his], dim=0)
+        neg = torch.stack([neg, neg_his], dim=0)
+        mask = torch.stack([mask, mask_his], dim=0) if mask is not None else None
         
         h_de = torch.cat([h_t, h_att], dim=-1)
         h_aug = torch.cat([h_t, h_att, h_his_t, h_his_att], dim=-1) # B, N, D
@@ -298,22 +307,13 @@ def print_params(model):
     return
 
 def main():
-    import sys
-    import argparse
-    from torchsummary import summary
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--gpu", type=int, default=3, help="which GPU to use")
-    parser.add_argument('--num_variable', type=int, default=207, help='number of variables (e.g., 207 in METR-LA, 325 in PEMS-BAY)')
-    parser.add_argument('--his_len', type=int, default=12, help='sequence length of historical observation')
-    parser.add_argument('--seq_len', type=int, default=12, help='sequence length of prediction')
-    parser.add_argument('--channelin', type=int, default=1, help='number of input channel')
-    parser.add_argument('--channelout', type=int, default=1, help='number of output channel')
-    parser.add_argument('--rnn_units', type=int, default=64, help='number of hidden units')
-    args = parser.parse_args()
-    device = torch.device("cuda:{}".format(args.gpu)) if torch.cuda.is_available() else torch.device("cpu")
-    model = MemDGCRN(num_nodes=args.num_variable, input_dim=args.channelin, output_dim=args.channelout, horizon=args.seq_len, rnn_units=args.rnn_units).to(device)
-    summary(model, [(args.his_len, args.num_variable, args.channelin), (args.seq_len, args.num_variable, args.channelout)], device=device)
-    print_params(model)
+    from torchinfo import summary
+    from utils import load_adj
+    
+    adj_mx = load_adj('../METRLA/adj_mx.pkl', "symadj")
+    adj_mx = [torch.FloatTensor(i) for i in adj_mx]
+    model = MDGCRNAdjHiDD(adj_mx=adj_mx)
+    summary(model, [[8, 12, 207, 1], [8, 12, 207, 1], [8, 12, 207, 1], [8, 12, 207, 1]], device="cpu")
     
 if __name__ == '__main__':
     main()

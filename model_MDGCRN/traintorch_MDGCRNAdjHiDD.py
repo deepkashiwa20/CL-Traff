@@ -34,12 +34,13 @@ class ContrastiveLoss():
             separate_loss = nn.TripletMarginLoss(margin=self.margin)
             return separate_loss(query, pos.detach(), neg.detach())
         else:
+            # print(query.shape, pos.shape, neg.shape)
             score_matrix = F.cosine_similarity(query.unsqueeze(-2), neg, dim=-1)  # (B, N, M)
             score_matrix = torch.exp(score_matrix / self.temp)
             pos_sum = torch.sum(score_matrix * mask, dim=-1)
             ratio = pos_sum / torch.sum(score_matrix, dim=-1)
             u_loss = torch.mean(-torch.log(ratio))
-            return u_loss  
+            return u_loss
 
 def print_model(model):
     param_count = 0
@@ -74,8 +75,7 @@ def prepare_x_y(x, y):
     x2 = x[..., 2:3]  
     y0 = y[..., 0:1]
     y1 = y[..., 1:2]
-    y2 = y[..., 2:3]
-    return x0.to(device), x1.to(device), x2.to(device), y0.to(device), y1.to(device), y2.to(device) # x, x_cov, y, y_cov
+    return x0, x1, x2, y0, y1 # x, x_cov, x_his, y, y_cov
 
 def evaluate(model, mode):
     with torch.no_grad():
@@ -84,8 +84,10 @@ def evaluate(model, mode):
         ys_true, ys_pred = [], []
         losses = []
         for x, y in data_iter:
-            x, x_cov, x_his, y, y_cov, _ = prepare_x_y(x, y)
-            output, h_att, query, pos, neg, mask, real_dis, latent_dis, mask_dis = model(x, x_cov, scaler.transform(x_his), y_cov)
+            x = x.to(device)
+            y = y.to(device)
+            x, x_cov, x_his, y, y_cov = prepare_x_y(x, y)
+            output, h_att, query, pos, neg, mask, real_dis, latent_dis, mask_dis = model(x, x_cov, x_his, y_cov)
             y_pred = scaler.inverse_transform(output)
             y_true = y
             ys_true.append(y_true)
@@ -118,6 +120,7 @@ def evaluate(model, mode):
 
     
 def traintest_model():  
+    # huber=nn.HuberLoss()
     model = get_model()
     print_model(model)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, eps=args.epsilon, weight_decay=args.weight_decay)
@@ -132,13 +135,17 @@ def traintest_model():
         losses, mae_losses, contra_losses, compact_losses, detect_losses = [], [], [], [], []
         for x, y in data_iter:
             optimizer.zero_grad()
-            x, x_cov, x_his, y, y_cov, _ = prepare_x_y(x, y)
-            output, h_att, query, pos, neg, mask, real_dis, latent_dis, mask_dis = model(x, x_cov, scaler.transform(x_his), y_cov, scaler.transform(y), batches_seen)
+            x = x.to(device)
+            y = y.to(device)
+            x, x_cov, x_his, y, y_cov = prepare_x_y(x, y)
+            output, h_att, query, pos, neg, mask, real_dis, latent_dis, mask_dis = model(x, x_cov, x_his, y_cov, scaler.transform(y), batches_seen)
             y_pred = scaler.inverse_transform(output)
             y_true = y
             mae_loss = masked_mae_loss(y_pred, y_true) # masked_mae_loss(y_pred, y_true)
+            # mae_loss=huber(y_pred, y_true)
             separate_loss = ContrastiveLoss(contra_loss=args.contra_loss, mask=mask, temp=args.temp)
-            u_loss = separate_loss.calculate(query, pos, neg, mask)
+            u_loss = separate_loss.calculate(query[0], pos[0], neg[0], mask[0])
+            u_loss += separate_loss.calculate(query[1], pos[1], neg[1], mask[1])
             if args.compact_loss == 'mse':
                 compact_loss = nn.MSELoss()
             elif args.compact_loss == 'rmse':
@@ -168,7 +175,8 @@ def traintest_model():
             losses.append(loss.item())
             batches_seen += 1
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm) # gradient clipping - this does it in place
+            if args.max_grad_norm:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm) # gradient clipping - this does it in place
             optimizer.step()
         train_loss = np.mean(losses)
         train_mae_loss = np.mean(mae_losses) 
@@ -252,30 +260,172 @@ if args.dataset == 'METRLA':
     data_path = f'../{args.dataset}/metr-la.h5'
     adj_mx_path = f'../{args.dataset}/adj_mx.pkl'
     args.num_nodes = 207
+    args.use_STE=False
+    
+    args.seed=888
+    # args.lamb=0
+    # args.lamb2=0
+    
+    # args.patience=10
+    # args.batch_size=16
+    # args.lr=0.001
+    # args.steps=[50, 100]
+    # args.weight_decay=0
+    # args.max_grad_norm=5
+    # args.rnn_units=128
+    # args.embed_dim=10
+    # args.mem_num=20
+    # args.mem_dim=64
+    # args.cl_decay_steps=6000
+    # args.max_diffusion_step=3
+    # args.lamb=0.1
+    # args.lamb2=2
+    
 elif args.dataset == 'PEMSBAY':
     data_path = f'../{args.dataset}/pems-bay.h5'
     adj_mx_path = f'../{args.dataset}/adj_mx_bay.pkl'
     args.num_nodes = 325
+    args.use_STE=False
     args.cl_decay_steps = 8000
     args.steps = [10, 150]
+    
+    args.seed=666
+    # args.lamb=0
+    # args.lamb2=0
+    
+    # args.patience=10
+    # args.batch_size=16
+    # args.lr=0.001
+    # args.steps=[50, 100]
+    # args.weight_decay=0
+    # args.max_grad_norm=5
+    # args.rnn_units=128
+    # args.embed_dim=10
+    # args.mem_num=20
+    # args.mem_dim=64
+    # args.cl_decay_steps=6000
+    # args.max_diffusion_step=3
+    # args.lamb=0.1
+    # args.lamb2=2
+    
+elif args.dataset == 'PEMS03':
+    data_path = f'../{args.dataset}/{args.dataset}.npz'
+    adj_mx_path = f'../{args.dataset}/adj_{args.dataset}_distance.pkl'
+    args.num_nodes = num_nodes_dict[args.dataset]
+    
+    # args.steps = [100]
+    # args.rnn_units = 32
+    # args.lamb2 = 1.5
+    
+    args.patience=10
+    args.batch_size=16
+    args.lr=0.001
+    args.steps=[50, 100]
+    args.weight_decay=0
+    args.max_grad_norm=0
+    args.rnn_units=32
+    args.embed_dim=16
+    args.mem_num=20
+    args.mem_dim=64
+    args.cl_decay_steps=6000
+    args.max_diffusion_step=3
+    args.lamb=0.000001
+    args.lamb2=2
+    
 elif args.dataset == 'PEMS04':
     data_path = f'../{args.dataset}/{args.dataset}.npz'
     adj_mx_path = f'../{args.dataset}/adj_{args.dataset}_distance.pkl'
     args.num_nodes = num_nodes_dict[args.dataset]
-    args.steps = [100]
-    # rnn_units = 32 #optimal
+    
+    # args.steps = [100]
+    # args.rnn_units = 32 #optimal
+    # args.lamb=0
+    # args.lamb2=1
+    
+    args.seed=999
+    
+    args.patience=30
+    args.batch_size=16
+    args.lr=0.001
+    args.steps=[50, 100]
+    args.weight_decay=0
+    args.max_grad_norm=0
+    args.rnn_units=32
+    args.embed_dim=16
+    args.mem_num=20
+    args.mem_dim=64
+    args.cl_decay_steps=6000
+    args.max_diffusion_step=3
+    args.lamb=0.0001
+    args.lamb2=2
+    
+elif args.dataset == 'PEMS07':
+    data_path = f'../{args.dataset}/{args.dataset}.npz'
+    adj_mx_path = f'../{args.dataset}/adj_{args.dataset}_distance.pkl'
+    args.num_nodes = num_nodes_dict[args.dataset]
+    
+    args.patience=10
+    args.batch_size=16
+    args.lr=0.001
+    args.steps=[50, 100]
+    args.weight_decay=0
+    args.max_grad_norm=0
+    args.rnn_units=64
+    args.embed_dim=16
+    args.mem_num=20
+    args.mem_dim=64
+    args.cl_decay_steps=6000
+    args.max_diffusion_step=3
+    args.lamb=0.0001
+    args.lamb2=2
+    
 elif args.dataset == 'PEMS08':
     data_path = f'../{args.dataset}/{args.dataset}.npz'
     adj_mx_path = f'../{args.dataset}/adj_{args.dataset}_distance.pkl'
     args.num_nodes = num_nodes_dict[args.dataset]
     args.steps = [100]
-    # rnn_units = 16 #optimal
-    # args.lamb2 = 1.5 #optimal
-else: # For PEMS03, PEMSD7L, PEMSD7M, and PEMS08, temporarily
+    args.rnn_units = 16 #optimal
+    
+    # args.lamb=0
+    args.lamb2=1.5
+    
+    args.seed=999
+    
+    # args.patience=10
+    # args.batch_size=16
+    # args.lr=0.001
+    # args.steps=[50, 100]
+    # args.weight_decay=0
+    # args.max_grad_norm=0
+    # args.rnn_units=16
+    # args.embed_dim=16
+    # args.mem_num=20
+    # args.mem_dim=64
+    # args.cl_decay_steps=6000
+    # args.max_diffusion_step=3
+    # args.lamb=0.000001
+    # args.lamb2=2
+    
+elif args.dataset == 'PEMSD7M':
     data_path = f'../{args.dataset}/{args.dataset}.npz'
     adj_mx_path = f'../{args.dataset}/adj_{args.dataset}_distance.pkl'
     args.num_nodes = num_nodes_dict[args.dataset]
-    args.steps = [100]
+    # args.use_STE = False
+    
+    args.patience=30
+    args.batch_size=16
+    args.lr=0.001
+    args.steps=[50, 100]
+    args.weight_decay=0
+    args.max_grad_norm=0
+    args.rnn_units=32
+    args.embed_dim=16
+    args.mem_num=16
+    args.mem_dim=64
+    args.cl_decay_steps=4000
+    args.max_diffusion_step=3
+    args.lamb=0.0001
+    args.lamb2=2
 
     
 model_name = 'MDGCRNAdjHiDD'
@@ -332,6 +482,7 @@ for category in ['train', 'val', 'test']:
 scaler = StandardScaler(mean=data['x_train'][..., 0].mean(), std=data['x_train'][..., 0].std())
 for category in ['train', 'val', 'test']:
     data['x_' + category][..., 0] = scaler.transform(data['x_' + category][..., 0])
+    data['x_' + category][..., 2] = scaler.transform(data['x_' + category][..., 2]) # x_his
 
 #* 既然max都相同, min干脆设置为0, 因为abs的最小值必定>=0, 这样同样能合理解释, 也能归一化到[0, 1],只不过最小值为0.07左右, 与0接近
 diff_max = np.max(np.abs(scaler.transform(data['x_train'][..., 0]) - scaler.transform(data['x_train'][..., -1])))  # 3.734067777528973 for x_train, x_val, and x_test
@@ -365,4 +516,4 @@ def main():
 if __name__ == '__main__':
     main()
     
-# nohup python traintest_DGCRN.py --gpu 3 > LA_noTrY.log 2>&1 &
+# nohup python traintorch_MDGCRNAdjHiDD.py --gpu 0 --dataset PEMS08 > ../logs/temp.log 2>&1 &
