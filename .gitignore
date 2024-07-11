@@ -29,3 +29,5 @@ logs/
 save/
 *.npz
 PEMS-BAY.h5
+.DS_Store
+temp*

@@ -132,46 +132,61 @@ def traintest_model():
         start_time = time.time()
         model = model.train()
         data_iter = data['train_loader']
-        losses, mae_losses, contra_losses, compact_losses, detect_losses = [], [], [], [], []
+        losses, mae_losses, contra_losses, detect_losses, XQ_losses, XP_losses = [], [], [], [], [], []
         for x, y in data_iter:
             optimizer.zero_grad()
             x = x.to(device)
             y = y.to(device)
             x, x_cov, x_his, y, y_cov = prepare_x_y(x, y)
-            output, h_att, query, pos, neg, mask, real_dis, latent_dis, mask_dis = model(x, x_cov, x_his, y_cov, scaler.transform(y), batches_seen)
+            output, h_att, query, pos, neg, mask, query_simi, pos_simi, mask_simi = model(x, x_cov, x_his, y_cov, scaler.transform(y), batches_seen)
             y_pred = scaler.inverse_transform(output)
             y_true = y
             mae_loss = masked_mae_loss(y_pred, y_true) # masked_mae_loss(y_pred, y_true)
             # mae_loss=huber(y_pred, y_true)
             separate_loss = ContrastiveLoss(contra_loss=args.contra_loss, mask=mask, temp=args.temp)
-            u_loss = separate_loss.calculate(query[0], pos[0], neg[0], mask[0])
-            u_loss += separate_loss.calculate(query[1], pos[1], neg[1], mask[1])
-            if args.compact_loss == 'mse':
-                compact_loss = nn.MSELoss()
-            elif args.compact_loss == 'rmse':
-                compact_loss = RMSE
-            elif args.compact_loss == 'mae':
-                compact_loss = MAE
-            else:
-                pass
-            loss_c = compact_loss(query, pos.detach())
+            loss_c = separate_loss.calculate(query[0], pos[0], neg[0], mask[0])
+            loss_c += separate_loss.calculate(query[1], pos[1], neg[1], mask[1])
             
-            if args.detect_loss == 'mse':
-                detect_loss = nn.MSELoss()
-            elif args.detect_loss == 'rmse':
-                detect_loss = RMSE
-            elif args.detect_loss == 'mae':
-                detect_loss = nn.L1Loss()
-            else:
-                pass
+            # if args.compact_loss == 'mse':
+            #     compact_loss = nn.MSELoss()
+            # elif args.compact_loss == 'rmse':
+            #     compact_loss = RMSE
+            # elif args.compact_loss == 'mae':
+            #     compact_loss = MAE
+            # else:
+            #     pass
+            # loss_compact = compact_loss(query, pos.detach())
+            
+            # if args.detect_loss == 'mse':
+            #     detect_loss = nn.MSELoss()
+            # elif args.detect_loss == 'rmse':
+            #     detect_loss = RMSE
+            # elif args.detect_loss == 'mae':
+            #     detect_loss = nn.L1Loss()
+            # else:
+            #     pass
+            
             # loss_d = detect_loss(real_dis, latent_dis, mask=mask_d)
-            loss_d = detect_loss(real_dis, latent_dis)
-            loss = mae_loss + args.lamb * u_loss + args.lamb1 * loss_c + args.lamb2 * loss_d
+            # loss_d = detect_loss(query_simi, pos_simi)
+            
+            x_simi = torch.cosine_similarity(x, x_his, dim=1).squeeze() # BTN1 -> BN
+            loss_xq = 1 - torch.cosine_similarity(query_simi, x_simi, dim=-1).mean()
+            
+            loss_d = 1 - torch.cosine_similarity(query_simi, pos_simi, dim=-1).mean()
+            
+            loss_xp = 1 - torch.cosine_similarity(x_simi, pos_simi, dim=-1).mean()
+            # loss_xp = F.l1_loss(x_simi, pos_simi)
+            
+            # loss_d = detect_loss(query_simi, pos_simi) + detect_loss(query_simi, x_simi)
+            
+            loss = mae_loss + args.lamb_c * loss_c + args.lamb_d * loss_d + args.lamb_xq * loss_xq + args.lamb_xp * loss_xp
+            
             losses.append(loss.item())
             mae_losses.append(mae_loss.item())
-            contra_losses.append(u_loss.item())
-            compact_losses.append(loss_c.item())
+            contra_losses.append(loss_c.item())
             detect_losses.append(loss_d.item())
+            XQ_losses.append(loss_xq.item())
+            XP_losses.append(loss_xp.item())
             losses.append(loss.item())
             batches_seen += 1
             loss.backward()
@@ -181,12 +196,13 @@ def traintest_model():
         train_loss = np.mean(losses)
         train_mae_loss = np.mean(mae_losses) 
         train_contra_loss = np.mean(contra_losses)
-        train_compact_loss = np.mean(compact_losses)
         train_detect_loss = np.mean(detect_losses)
+        train_XQ_loss = np.mean(XQ_losses)
+        train_XP_loss = np.mean(XP_losses)
         lr_scheduler.step()
         val_loss, _, _ = evaluate(model, 'val')
         end_time2 = time.time()
-        message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, train_mae_loss: {:.4f}, train_contra_loss: {:.4f}, train_compact_loss: {:.4f}, train_detect_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.1f}s'.format(epoch_num + 1, args.epochs, batches_seen, train_loss, train_mae_loss, train_contra_loss, train_compact_loss, train_detect_loss, val_loss, optimizer.param_groups[0]['lr'], (end_time2 - start_time))
+        message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, train_mae_loss: {:.4f}, train_contra_loss: {:.4f}, train_detect_loss: {:.4f}, train_XQ_loss: {:.4f}, train_XP_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.1f}s'.format(epoch_num + 1, args.epochs, batches_seen, train_loss, train_mae_loss, train_contra_loss, train_detect_loss, train_XQ_loss, train_XP_loss, val_loss, optimizer.param_groups[0]['lr'], (end_time2 - start_time))
         logger.info(message)
         test_loss, _, _ = evaluate(model, 'test')
 
@@ -209,8 +225,8 @@ def traintest_model():
 #########################################################################################    
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', type=str, choices=['METRLA', 'PEMSBAY','PEMS03','PEMS04','PEMS07','PEMS08','PEMSD7L','PEMSD7M'], default='METRLA', help='which dataset to run')
-parser.add_argument('--trainval_ratio', type=float, default=0.8, help='the ratio of training and validation data among the total')
-parser.add_argument('--val_ratio', type=float, default=0.125, help='the ratio of validation data among the trainval ratio')
+# parser.add_argument('--trainval_ratio', type=float, default=0.8, help='the ratio of training and validation data among the total')
+# parser.add_argument('--val_ratio', type=float, default=0.125, help='the ratio of validation data among the trainval ratio')
 parser.add_argument('--num_nodes', type=int, default=207, help='num_nodes')
 parser.add_argument('--seq_len', type=int, default=12, help='input sequence length')
 parser.add_argument('--horizon', type=int, default=12, help='output sequence length')
@@ -237,11 +253,12 @@ parser.add_argument("--adj_type", type=str, default='symadj', help="scalap, norm
 parser.add_argument("--cl_decay_steps", type=int, default=2000, help="cl_decay_steps")
 parser.add_argument('--gpu', type=int, default=0, help='which gpu to use')
 parser.add_argument('--seed', type=int, default=100, help='random seed.')
-# TODO: support contra learning
 parser.add_argument('--temp', type=float, default=1.0, help='temperature parameter')
-parser.add_argument('--lamb', type=float, default=0.1, help='contra loss lambda') 
-parser.add_argument('--lamb1', type=float, default=0.0, help='compact loss lambda') 
-parser.add_argument('--lamb2', type=float, default=1.0, help='anomaly detection loss lambda') 
+# parser.add_argument('--lamb1', type=float, default=0.0, help='compact loss lambda')
+parser.add_argument('--lamb_c', type=float, default=0.1, help='contra loss lambda') 
+parser.add_argument('--lamb_d', type=float, default=1.0, help='anomaly detection loss lambda') 
+parser.add_argument('--lamb_xq', type=float, default=1.0, help='X-Q loss lambda')
+parser.add_argument('--lamb_xp', type=float, default=1.0, help='X-P loss lambda')
 parser.add_argument('--contra_loss', type=str, choices=['triplet', 'infonce'], default='infonce', help='whether to triplet or infonce contra loss')
 parser.add_argument('--compact_loss', type=str, choices=['mse', 'rmse', 'mae'], default='mse', help='which method to calculate compact loss')
 parser.add_argument('--detect_loss', type=str, choices=['mse', 'rmse', 'mae'], default='mae', help='which method to calculate detect loss')
@@ -263,8 +280,10 @@ if args.dataset == 'METRLA':
     args.use_STE=False
     
     args.seed=888
-    # args.lamb=0
-    # args.lamb2=0
+    args.lamb_c=0.1
+    args.lamb_d=1
+    args.lamb_xq=1
+    args.lamb_xp=0
     
     # args.patience=10
     # args.batch_size=16
@@ -274,12 +293,12 @@ if args.dataset == 'METRLA':
     # args.max_grad_norm=5
     # args.rnn_units=128
     # args.embed_dim=10
-    # args.mem_num=20
+    # args.mem_num=8
     # args.mem_dim=64
     # args.cl_decay_steps=6000
     # args.max_diffusion_step=3
-    # args.lamb=0.1
-    # args.lamb2=2
+    # args.lamb_c=0.1
+    # args.lamb_d=2
     
 elif args.dataset == 'PEMSBAY':
     data_path = f'../{args.dataset}/pems-bay.h5'
@@ -290,8 +309,8 @@ elif args.dataset == 'PEMSBAY':
     args.steps = [10, 150]
     
     args.seed=666
-    # args.lamb=0
-    # args.lamb2=0
+    # args.lamb_c=0
+    # args.lamb_d=0
     
     # args.patience=10
     # args.batch_size=16
@@ -305,8 +324,8 @@ elif args.dataset == 'PEMSBAY':
     # args.mem_dim=64
     # args.cl_decay_steps=6000
     # args.max_diffusion_step=3
-    # args.lamb=0.1
-    # args.lamb2=2
+    # args.lamb_c=0.1
+    # args.lamb_d=2
     
 elif args.dataset == 'PEMS03':
     data_path = f'../{args.dataset}/{args.dataset}.npz'
@@ -315,7 +334,7 @@ elif args.dataset == 'PEMS03':
     
     # args.steps = [100]
     # args.rnn_units = 32
-    # args.lamb2 = 1.5
+    # args.lamb_d = 1.5
     
     args.patience=10
     args.batch_size=16
@@ -329,8 +348,8 @@ elif args.dataset == 'PEMS03':
     args.mem_dim=64
     args.cl_decay_steps=6000
     args.max_diffusion_step=3
-    args.lamb=0.000001
-    args.lamb2=2
+    args.lamb_c=0.000001
+    args.lamb_d=2
     
 elif args.dataset == 'PEMS04':
     data_path = f'../{args.dataset}/{args.dataset}.npz'
@@ -339,8 +358,8 @@ elif args.dataset == 'PEMS04':
     
     # args.steps = [100]
     # args.rnn_units = 32 #optimal
-    # args.lamb=0
-    # args.lamb2=1
+    # args.lamb_c=0
+    # args.lamb_d=1
     
     args.seed=999
     
@@ -356,8 +375,8 @@ elif args.dataset == 'PEMS04':
     args.mem_dim=64
     args.cl_decay_steps=6000
     args.max_diffusion_step=3
-    args.lamb=0.0001
-    args.lamb2=2
+    args.lamb_c=0.0001
+    args.lamb_d=2
     
 elif args.dataset == 'PEMS07':
     data_path = f'../{args.dataset}/{args.dataset}.npz'
@@ -376,8 +395,8 @@ elif args.dataset == 'PEMS07':
     args.mem_dim=64
     args.cl_decay_steps=6000
     args.max_diffusion_step=3
-    args.lamb=0.0001
-    args.lamb2=2
+    args.lamb_c=0.0001
+    args.lamb_d=2
     
 elif args.dataset == 'PEMS08':
     data_path = f'../{args.dataset}/{args.dataset}.npz'
@@ -386,8 +405,8 @@ elif args.dataset == 'PEMS08':
     args.steps = [100]
     args.rnn_units = 16 #optimal
     
-    # args.lamb=0
-    args.lamb2=1.5
+    # args.lamb_c=0
+    args.lamb_d=1.5
     
     args.seed=999
     
@@ -403,8 +422,8 @@ elif args.dataset == 'PEMS08':
     # args.mem_dim=64
     # args.cl_decay_steps=6000
     # args.max_diffusion_step=3
-    # args.lamb=0.000001
-    # args.lamb2=2
+    # args.lamb_c=0.000001
+    # args.lamb_d=2
     
 elif args.dataset == 'PEMSD7M':
     data_path = f'../{args.dataset}/{args.dataset}.npz'
@@ -424,8 +443,8 @@ elif args.dataset == 'PEMSD7M':
     args.mem_dim=64
     args.cl_decay_steps=4000
     args.max_diffusion_step=3
-    args.lamb=0.0001
-    args.lamb2=2
+    args.lamb_c=0.0001
+    args.lamb_d=2
 
     
 model_name = 'MDGCRNAdjHiDD'
