@@ -17,7 +17,7 @@ from metrics import RMSE, MAE, MSE
 from MDGCRNAdjHiDD import MDGCRNAdjHiDD
 
 class ContrastiveLoss():
-    def __init__(self, contra_loss='triplet', mask=None, temp=1.0, margin=1.0):
+    def __init__(self, contra_loss='triplet', mask=None, temp=1.0, margin=1):
         self.infonce = contra_loss in ['infonce']
         self.mask = mask
         self.temp = temp
@@ -144,8 +144,9 @@ def traintest_model():
             mae_loss = masked_mae_loss(y_pred, y_true) # masked_mae_loss(y_pred, y_true)
             # mae_loss=huber(y_pred, y_true)
             separate_loss = ContrastiveLoss(contra_loss=args.contra_loss, mask=mask, temp=args.temp)
+            # when use triplet: mask is None
             loss_c = separate_loss.calculate(query[0], pos[0], neg[0], mask[0])
-            loss_c += separate_loss.calculate(query[1], pos[1], neg[1], mask[1])
+            # loss_c += separate_loss.calculate(query[1], pos[1], neg[1], mask[1])
             
             # if args.compact_loss == 'mse':
             #     compact_loss = nn.MSELoss()
@@ -166,18 +167,21 @@ def traintest_model():
             # else:
             #     pass
             
-            # loss_d = detect_loss(real_dis, latent_dis, mask=mask_d)
-            # loss_d = detect_loss(query_simi, pos_simi)
+            loss_d = F.l1_loss(query_simi, pos_simi)
+            
+            # loss_d = 1 - torch.cosine_similarity(query_simi, pos_simi, dim=-1).mean()
             
             x_simi = torch.cosine_similarity(x, x_his, dim=1).squeeze() # BTN1 -> BN
+            
             loss_xq = 1 - torch.cosine_similarity(query_simi, x_simi, dim=-1).mean()
             
-            loss_d = 1 - torch.cosine_similarity(query_simi, pos_simi, dim=-1).mean()
+            # 给abnormal case加高权重
+            # loss_xq = ((1 - x_simi) * torch.abs(query_simi - x_simi)).sum(dim=-1).mean()
+            
+            # loss_d = ((1 - x_simi) * torch.abs(query_simi - pos_simi)).sum(dim=-1).mean()
             
             loss_xp = 1 - torch.cosine_similarity(x_simi, pos_simi, dim=-1).mean()
             # loss_xp = F.l1_loss(x_simi, pos_simi)
-            
-            # loss_d = detect_loss(query_simi, pos_simi) + detect_loss(query_simi, x_simi)
             
             loss = mae_loss + args.lamb_c * loss_c + args.lamb_d * loss_d + args.lamb_xq * loss_xq + args.lamb_xp * loss_xp
             
@@ -205,6 +209,10 @@ def traintest_model():
         message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, train_mae_loss: {:.4f}, train_contra_loss: {:.4f}, train_detect_loss: {:.4f}, train_XQ_loss: {:.4f}, train_XP_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.1f}s'.format(epoch_num + 1, args.epochs, batches_seen, train_loss, train_mae_loss, train_contra_loss, train_detect_loss, train_XQ_loss, train_XP_loss, val_loss, optimizer.param_groups[0]['lr'], (end_time2 - start_time))
         logger.info(message)
         test_loss, _, _ = evaluate(model, 'test')
+        
+        # if (epoch_num + 1) in [5, 10, 20, 40]:
+        #     torch.save(model.state_dict(), f"LA_CD_trip_ep{epoch_num + 1}.pt")
+        #     logger.info(f"Saving model at epoch {epoch_num + 1}")
 
         if val_loss < min_val_loss:
             wait = 0
@@ -233,7 +241,7 @@ parser.add_argument('--horizon', type=int, default=12, help='output sequence len
 parser.add_argument('--input_dim', type=int, default=1, help='number of input channel')
 parser.add_argument('--output_dim', type=int, default=1, help='number of output channel')
 parser.add_argument('--embed_dim', type=int, default=10, help='embedding dimension for adaptive graph')
-parser.add_argument('--max_diffusion_step', type=int, default=3, help='max diffusion step or Cheb K')
+parser.add_argument('--cheb_k', type=int, default=3, help='max diffusion step or Cheb K')
 parser.add_argument('--rnn_layers', type=int, default=1, help='number of rnn layers')
 parser.add_argument('--rnn_units', type=int, default=128, help='number of rnn units')
 parser.add_argument('--mem_num', type=int, default=20, help='number of meta-nodes/prototypes')
@@ -281,9 +289,15 @@ if args.dataset == 'METRLA':
     
     args.seed=888
     args.lamb_c=0.1
-    args.lamb_d=1
-    args.lamb_xq=1
+    args.lamb_d=0
+    args.lamb_xq=0
     args.lamb_xp=0
+    
+    args.contra_loss="triplet"
+    
+    # args.rnn_layers=3
+    
+    # args.cheb_k=2
     
     # args.patience=10
     # args.batch_size=16

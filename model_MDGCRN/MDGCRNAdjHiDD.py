@@ -9,6 +9,7 @@ class AGCN(nn.Module):
         super(AGCN, self).__init__()
         self.cheb_k = cheb_k
         self.weights = nn.Parameter(torch.FloatTensor(num_support*cheb_k*dim_in, dim_out)) # num_support*cheb_k*dim_in is the length of support
+        # self.weights = nn.Parameter(torch.FloatTensor(dim_in, dim_out))
         self.bias = nn.Parameter(torch.FloatTensor(dim_out))
         nn.init.xavier_normal_(self.weights)
         nn.init.constant_(self.bias, val=0)
@@ -30,6 +31,7 @@ class AGCN(nn.Module):
                     x_g.append(torch.einsum("bnm,bmc->bnc", graph, x))
         x_g = torch.cat(x_g, dim=-1)
         x_gconv = torch.einsum('bni,io->bno', x_g, self.weights) + self.bias  # b, N, dim_out
+        # x_gconv = torch.einsum('bni,io->bno', x, self.weights) + self.bias  # b, N, dim_out
         return x_gconv
     
 class AGCRNCell(nn.Module):
@@ -168,6 +170,7 @@ class MDGCRNAdjHiDD(nn.Module):
         
         # deocoder
         self.decoder_dim = self.rnn_units + self.mem_dim
+        # self.decoder_dim = (self.rnn_units + self.mem_dim)*2
         if self.use_STE:
             self.decoder = ADCRNN_Decoder(self.num_nodes, self.rnn_units + self.embed_dim * 2, self.decoder_dim, self.cheb_k, self.rnn_layers, 1)
         else:
@@ -179,6 +182,7 @@ class MDGCRNAdjHiDD(nn.Module):
         # graph
 
         self.hypernet = nn.Sequential(nn.Linear(self.decoder_dim*2, self.embed_dim, bias=True))
+        # self.hypernet = nn.Linear(self.decoder_dim, self.embed_dim)
         
         self.act_dict = {'relu': nn.ReLU(), 'lrelu': nn.LeakyReLU(), 'sigmoid': nn.Sigmoid()}
         self.act_fn = 'sigmoid'  # 'relu' 'lrelu' 'sigmoid'
@@ -222,8 +226,8 @@ class MDGCRNAdjHiDD(nn.Module):
         return value, query, pos, neg, mask
     
     def calculate_cosine(self, pos, pos_his, use_mask=False, mask=None):
-        score = F.cosine_similarity(pos, pos_his, dim=-1)  # B, N
-        # score = torch.sum(torch.abs(pos - pos_his), dim=-1)
+        # score = F.cosine_similarity(pos, pos_his, dim=-1)  # B, N
+        score = torch.sum(torch.abs(pos - pos_his), dim=-1)
         return score, mask
         if use_mask:  #* add mask
             mask = (torch.mean(pos.eq(pos_his).float(), dim=-1) < 1).int()  # True means anomoly
@@ -256,18 +260,20 @@ class MDGCRNAdjHiDD(nn.Module):
         # real_dis = (torch.clamp(torch.abs(x-x_his)[:, -1, :, :].squeeze(-1), min=self.diff_min, max=self.diff_max) - self.diff_min) / (self.diff_max - self.diff_min) 
         real_dis, _ = self.calculate_cosine(query, query_his)
         latent_dis, mask_dis = self.calculate_cosine(pos, pos_his, use_mask=self.use_mask)
-        latent_dis = self.act_dict.get(self.act_fn)(latent_dis)
+        # latent_dis = self.act_dict.get(self.act_fn)(latent_dis)
         
         # TODO: for additional query, pos, neg, mask
         query = torch.stack([query, query_his], dim=0)
         pos = torch.stack([pos, pos_his], dim=0)
         neg = torch.stack([neg, neg_his], dim=0)
-        mask = torch.stack([mask, mask_his], dim=0) if mask is not None else None
+        mask = torch.stack([mask, mask_his], dim=0) if mask is not None else [None, None] # adapted for DZ version 此改动仅为了代码方便, 无实际意义
         
         h_de = torch.cat([h_t, h_att], dim=-1)
         h_aug = torch.cat([h_t, h_att, h_his_t, h_his_att], dim=-1) # B, N, D
+        # h_de=h_aug
         
         node_embeddings = self.hypernet(h_aug) # B, N, e
+        # node_embeddings = self.hypernet(h_de) # B, N, e
         support = F.softmax(F.relu(torch.einsum('bnc,bmc->bnm', node_embeddings, node_embeddings)), dim=-1) 
         supports_de = [support]
         
