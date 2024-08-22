@@ -152,15 +152,10 @@ class MDGCRN_NoMem(nn.Module):
         rnn_layers=1,
         cheb_k=3,
         ycov_dim=1,
-        mem_num=20,
-        mem_dim=64,
         embed_dim=10,
         adj_mx=None,
         tf_decay_steps=2000,
         use_teacher_forcing=True,
-        contra_loss="triplet",
-        diff_max=3.74,
-        diff_min=0,
         use_STE=False,
         device="cpu",
     ):
@@ -176,22 +171,9 @@ class MDGCRN_NoMem(nn.Module):
         self.embed_dim = embed_dim
         self.tf_decay_steps = tf_decay_steps
         self.use_teacher_forcing = use_teacher_forcing
-        self.contra_loss = contra_loss
         self.device = device
-        self.diff_min = diff_min
-        self.diff_max = diff_max
         self.use_STE = use_STE
         self.TDAY = 288
-
-        # memory
-        self.mem_num = mem_num
-        self.mem_dim = mem_dim
-        self.memory = nn.init.xavier_normal_(
-            nn.Parameter(torch.randn(self.mem_num, self.mem_dim))
-        )
-        self.memory_Wq = nn.init.xavier_normal_(
-            nn.Parameter(torch.randn(self.rnn_units, self.mem_dim))
-        )
 
         # projection & spatio-temporal embedding
         if self.use_STE:
@@ -226,8 +208,7 @@ class MDGCRN_NoMem(nn.Module):
             )
 
         # deocoder
-        self.decoder_dim = self.rnn_units + self.mem_dim
-        # self.decoder_dim = (self.rnn_units + self.mem_dim)*2
+        self.decoder_dim = self.rnn_units
         if self.use_STE:
             self.decoder = ADCRNN_Decoder(
                 self.num_nodes,
@@ -248,45 +229,15 @@ class MDGCRN_NoMem(nn.Module):
             )
 
         # output
-        self.proj = nn.Linear(self.decoder_dim, self.output_dim, bias=True)
+        self.proj = nn.Linear(self.decoder_dim, self.output_dim)
 
         # graph
-        self.hypernet = nn.Linear(self.decoder_dim * 2, self.embed_dim, bias=True)
-        # self.hypernet = nn.Linear(self.decoder_dim, self.embed_dim)
+        self.hypernet = nn.Linear(self.rnn_units*2, self.embed_dim)
 
     def compute_sampling_threshold(self, batches_seen):
         return self.tf_decay_steps / (
             self.tf_decay_steps + np.exp(batches_seen / self.tf_decay_steps)
         )
-
-    def query_memory(self, h_t):
-        query = torch.matmul(h_t, self.memory_Wq)  # (B, N, d)
-        att_score = torch.softmax(
-            torch.matmul(query, self.memory.t()), dim=-1
-        )  # alpha: (B, N, M)
-        value = torch.matmul(att_score, self.memory)  # (B, N, d)
-        _, ind = torch.topk(att_score, k=2, dim=-1)
-        pos = self.memory[ind[:, :, 0]]  # B, N, d
-        if self.contra_loss == "infonce":  # InfoNCE loss
-            neg = self.memory.repeat(
-                query.shape[0], self.num_nodes, 1, 1
-            )  # (B, N, M, d)
-            mask_index = ind[:, :, [0]]  # B, N, 1
-            mask = torch.zeros_like(att_score, dtype=torch.bool).to(
-                att_score.device
-            )  # B, N, M
-            mask = mask.scatter(-1, mask_index, True)
-        elif self.contra_loss == "triplet":  # Triplet loss
-            neg = self.memory[ind[:, :, 1]]  # B, N, d
-            mask = None
-        else:
-            raise ValueError("Invalid contra loss type")
-        return value, query, pos, neg, mask
-
-    def calculate_sim(self, input, input_his):
-        # score = F.cosine_similarity(input, input_his, dim=-1)  # B, N
-        score = torch.sum(torch.abs(input - input_his), dim=-1)
-        return score
 
     def forward(self, x, x_cov, x_his, y_cov, labels=None, batches_seen=None):
         if self.use_STE:
@@ -305,31 +256,15 @@ class MDGCRN_NoMem(nn.Module):
         init_state = self.encoder.init_hidden(x.shape[0])
         h_en, state_en = self.encoder(x, init_state, supports_en)  # B, T, N, hidden
         h_t = h_en[:, -1, :, :]  # B, N, hidden (last state)
-        h_att, query, pos, neg, mask = self.query_memory(h_t)
 
         # for x_his
         h_his_en, state_his_en = self.encoder(
             x_his, init_state, supports_en
         )  # B, T, N, hidden
         h_his_t = h_his_en[:, -1, :, :]  # B, N, hidden (last state)
-        h_his_att, query_his, pos_his, neg_his, mask_his = self.query_memory(h_his_t)
 
-        # detection loss
-        # normalization [0, 1]
-        # real_dis = (torch.clamp(torch.abs(x-x_his)[:, -1, :, :].squeeze(-1), min=self.diff_min, max=self.diff_max) - self.diff_min) / (self.diff_max - self.diff_min)
-        query_sim = self.calculate_sim(query, query_his)
-        pos_sim = self.calculate_sim(pos, pos_his)
-
-        # for additional query, pos, neg, mask
-        query = torch.stack([query, query_his], dim=0)
-        pos = torch.stack([pos, pos_his], dim=0)
-        neg = torch.stack([neg, neg_his], dim=0)
-        mask = (
-            torch.stack([mask, mask_his], dim=0) if mask is not None else [None, None]
-        )  # adapted for DZ version 此改动仅为了代码方便, 无实际意义
-
-        h_de = torch.cat([h_t, h_att], dim=-1)
-        h_aug = torch.cat([h_t, h_att, h_his_t, h_his_att], dim=-1)  # B, N, D
+        h_de = h_t
+        h_aug = torch.cat([h_t, h_his_t], dim=-1)  # B, N, D
 
         node_embeddings = self.hypernet(h_aug)  # B, N, e
         support = torch.softmax(
@@ -360,7 +295,7 @@ class MDGCRN_NoMem(nn.Module):
 
         output = torch.stack(out, dim=1)
 
-        return output, h_att, query, pos, neg, mask, query_sim, pos_sim
+        return output, h_t, h_his_t
 
 
 if __name__ == "__main__":

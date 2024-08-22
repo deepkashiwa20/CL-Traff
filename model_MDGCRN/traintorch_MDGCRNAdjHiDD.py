@@ -17,7 +17,7 @@ from metrics import RMSE, MAE, MSE
 from MDGCRNAdjHiDD import MDGCRNAdjHiDD
 
 class ContrastiveLoss():
-    def __init__(self, contra_loss='triplet', mask=None, temp=1.0, margin=1):
+    def __init__(self, contra_loss='triplet', mask=None, temp=1.0, margin=0.5):
         self.infonce = contra_loss in ['infonce']
         self.mask = mask
         self.temp = temp
@@ -56,7 +56,7 @@ def get_model():
     adj_mx = load_adj(adj_mx_path, args.adj_type)
     adjs = [torch.tensor(i).to(device) for i in adj_mx]            
     model = MDGCRNAdjHiDD(num_nodes=args.num_nodes, input_dim=args.input_dim, output_dim=args.output_dim, horizon=args.horizon, 
-                 rnn_units=args.rnn_units, rnn_layers=args.rnn_layers, cheb_k = args.max_diffusion_step, mem_num=args.mem_num, 
+                 rnn_units=args.rnn_units, rnn_layers=args.rnn_layers, cheb_k = args.cheb_k, mem_num=args.mem_num, 
                  mem_dim=args.mem_dim, embed_dim=args.embed_dim, adj_mx = adjs, cl_decay_steps=args.cl_decay_steps, use_curriculum_learning=args.use_curriculum_learning, 
                  contra_loss=args.contra_loss, diff_max=diff_max, diff_min=diff_min, use_mask=args.use_mask, use_STE=args.use_STE, device=device).to(device)
     return model
@@ -146,7 +146,7 @@ def traintest_model():
             separate_loss = ContrastiveLoss(contra_loss=args.contra_loss, mask=mask, temp=args.temp)
             # when use triplet: mask is None
             loss_c = separate_loss.calculate(query[0], pos[0], neg[0], mask[0])
-            # loss_c += separate_loss.calculate(query[1], pos[1], neg[1], mask[1])
+            loss_c += separate_loss.calculate(query[1], pos[1], neg[1], mask[1])
             
             # if args.compact_loss == 'mse':
             #     compact_loss = nn.MSELoss()
@@ -173,10 +173,10 @@ def traintest_model():
             
             x_simi = torch.cosine_similarity(x, x_his, dim=1).squeeze() # BTN1 -> BN
             
-            loss_xq = 1 - torch.cosine_similarity(query_simi, x_simi, dim=-1).mean()
+            # loss_xq = 1 - torch.cosine_similarity(query_simi, x_simi, dim=-1).mean()
             
             # 给abnormal case加高权重
-            # loss_xq = ((1 - x_simi) * torch.abs(query_simi - x_simi)).sum(dim=-1).mean()
+            loss_xq = ((1 - x_simi) * torch.abs(query_simi - x_simi)).sum(dim=-1).mean()
             
             # loss_d = ((1 - x_simi) * torch.abs(query_simi - pos_simi)).sum(dim=-1).mean()
             
@@ -289,7 +289,7 @@ if args.dataset == 'METRLA':
     
     args.seed=888
     args.lamb_c=0.1
-    args.lamb_d=0
+    args.lamb_d=1
     args.lamb_xq=0
     args.lamb_xp=0
     

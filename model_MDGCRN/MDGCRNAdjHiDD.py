@@ -223,6 +223,9 @@ class MDGCRNAdjHiDD(nn.Module):
             mask = None
         else:
             pass
+        
+        # pos=(pos+query)/2
+            
         return value, query, pos, neg, mask
     
     def calculate_cosine(self, pos, pos_his, use_mask=False, mask=None):
