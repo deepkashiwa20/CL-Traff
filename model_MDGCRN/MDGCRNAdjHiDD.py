@@ -180,7 +180,6 @@ class MDGCRNAdjHiDD(nn.Module):
         self.proj = nn.Sequential(nn.Linear(self.decoder_dim, self.output_dim, bias=True))
         
         # graph
-
         self.hypernet = nn.Sequential(nn.Linear(self.decoder_dim*2, self.embed_dim, bias=True))
         # self.hypernet = nn.Linear(self.decoder_dim, self.embed_dim)
         
@@ -192,8 +191,14 @@ class MDGCRNAdjHiDD(nn.Module):
 
     def construct_memory(self):
         memory_dict = nn.ParameterDict()
-        memory_dict['Memory'] = nn.Parameter(torch.randn(self.mem_num, self.mem_dim), requires_grad=True)     # (M, d)
-        memory_dict['Wq'] = nn.Parameter(torch.randn(self.rnn_units, self.mem_dim), requires_grad=True)    # project to query
+        mem=torch.randn(self.mem_num, self.mem_dim)
+        # mem=torch.normal(mean=0, std=0.01, size=(self.mem_num, self.mem_dim))
+        # noise=torch.randn(self.mem_dim)
+        # mem[0]+=noise
+        # mem[1]-=noise
+        # mem[1]=mem[0]*0.9
+        memory_dict['Memory'] = nn.Parameter(mem, requires_grad=True)     # (M, d)
+        # memory_dict['Wq'] = nn.Parameter(torch.randn(self.rnn_units, self.mem_dim), requires_grad=True)    # project to query
         for param in memory_dict.values():
             nn.init.xavier_normal_(param)
         return memory_dict
@@ -220,7 +225,7 @@ class MDGCRNAdjHiDD(nn.Module):
             # mask[torch.arange(b)[:, None], torch.arange(n), ind]=1
         elif self.contra_loss in ['triplet']:  # Triplet loss
             neg = self.memory['Memory'][ind[:, :, 1]] # B, N, d
-            mask = None
+            mask = torch.stack([ind[:, :, 0], ind[:, :, 1]], dim=-1) # B, N, 2
         else:
             pass
         
@@ -270,6 +275,7 @@ class MDGCRNAdjHiDD(nn.Module):
         pos = torch.stack([pos, pos_his], dim=0)
         neg = torch.stack([neg, neg_his], dim=0)
         mask = torch.stack([mask, mask_his], dim=0) if mask is not None else [None, None] # adapted for DZ version 此改动仅为了代码方便, 无实际意义
+        # 2, B, N, 2 if triplet
         
         h_de = torch.cat([h_t, h_att], dim=-1)
         h_aug = torch.cat([h_t, h_att, h_his_t, h_his_att], dim=-1) # B, N, D

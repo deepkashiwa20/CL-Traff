@@ -16,6 +16,82 @@ from utils import load_adj
 from metrics import RMSE, MAE, MSE
 from MDGCRNAdjHiDD import MDGCRNAdjHiDD
 
+class custom_loss(nn.Module):
+    def __init__(self, init_margin=5):
+        super(custom_loss, self).__init__()
+        self.margin = torch.tensor(init_margin)
+        # self.margin = nn.Parameter(torch.tensor(init_margin))
+        # self.margin = nn.Parameter(torch.tensor(np.random.random()))
+        # self.margin = nn.Parameter(torch.randn(size=(207,)))
+        # self.hinge = nn.HingeEmbeddingLoss(5)
+        # self.meta_dist_limit=nn.Parameter(torch.tensor(np.random.random()))
+
+    def forward(self, x, x_his, meta_dist):
+        """
+        异常的情况 x-x_his大 把meta_dist优化的尽可能大 margin尽量小
+        正常的情况 x-x_his小 把meta_dist优化的尽可能小 margin尽量大
+        margin是判断是否正常的标准 同时也是meta_dist的极值
+        样本不平衡 margin需要约束?
+        
+        1. 为什么只作用了第一个ep就管用
+        2. 为什么在全走normal分支的情况下 依然能出case
+        
+        第一个ep 全走normal 所有meta_dist大于margin的情况都会被loss减小 则meta node之间距离收紧
+        ! 只有x的pos和neg参与C loss
+        但是每个meta node分配到的x个数不一样 所以减小的幅度不同 -> print 每一类的x个数 (每个metanode的选取次数)
+        是否相当于meta node的重初始化? 能否在无newD的情况下只用C还原相同的情景?
+          1. 选两个mnode 一个+噪声一个-噪声 单独拉出两个点
+          2. 两个mnode 初始化的时候单独拉近
+          3. 减小初始化的var
+          4. num_meta=2
+        两个起作用的meta node第一个ep被拉近, 然后在C的作用下逐渐分开?
+        两个起作用的meta node第一个ep被拉近同时被C与其他node分开?
+        
+        无D?: 必须在C和D (虽然只作用一个epoch) 下才能收敛到两个meta上
+        无C 那么所有case=0的情况是C导致的, 由于所有样本只选一个metanode, 导致其他所有都是负样本都被推远
+        无CD: case数差不多, 但是选取次数分布比无D更极端, 也就是说只作用了一个epoch的D会让分布更平均
+        
+        log:
+          1. x的pos和neg
+          2. x和x_his的pos
+          3. 只有C的时候 D的变化
+        """
+        
+        # margin=self.margin.expand(x.shape[0], self.margin.shape[0]).to(x.device)
+        
+        # 计算在 T 维度上的 MAE, 结果为 (B, N)
+        x_dis = torch.abs(x - x_his).mean(dim=1).squeeze()  # B,N
+
+        # loss_smaller = F.relu(meta_dist - self.margin)  # MAE 较小时 normal
+        # loss_greater = F.relu(self.margin - meta_dist)  # MAE 较大时 abnormal
+        # # 使用 torch.where 在 MAE 大于 margin 和小于等于 margin 的情况下选择不同的损失
+        # loss = torch.where(mae > self.margin, loss_greater, loss_smaller)
+        
+        # x_cos = torch.cosine_similarity(x, x_his, dim=1).squeeze() # BTN1 -> BN
+        # loss = torch.relu((1-x_cos)*torch.sign(mae-self.margin)*(self.margin-meta_dist))
+        loss = torch.relu(torch.sign(x_dis-self.margin)*(self.margin-meta_dist))
+        
+        # loss = torch.sign(x_dis-margin)*(-margin-meta_dist)
+        
+        # loss = torch.relu(self.margin - meta_dist)*(mae>self.margin)
+        
+        # loss = self.hinge(meta_dist, mae < self.margin)
+        
+        # loss_smaller = F.relu(meta_dist - self.margin)  # MAE 较小时 normal
+        # loss_greater = -meta_dist  # MAE 较大时 abnormal
+        # loss = torch.where(x_dis > self.margin, loss_greater, loss_smaller)
+        
+        # loss = torch.relu(torch.sign(x_dis-self.margin)*(self.meta_dist_limit-meta_dist))
+        # loss = torch.exp(torch.sign(x_dis-self.margin)*(-meta_dist))
+        
+        loss = loss.sum(dim=-1).mean()
+        
+        is_abnormal=(x_dis>self.margin).ravel()
+        abnormal_count=is_abnormal.sum()
+        normal_count=len(is_abnormal)-abnormal_count
+        
+        return loss, abnormal_count, normal_count
+
 class ContrastiveLoss():
     def __init__(self, contra_loss='triplet', mask=None, temp=1.0, margin=0.5):
         self.infonce = contra_loss in ['infonce']
@@ -83,6 +159,7 @@ def evaluate(model, mode):
         data_iter =  data[f'{mode}_loader']
         ys_true, ys_pred = [], []
         losses = []
+        diff_num = 0
         for x, y in data_iter:
             x = x.to(device)
             y = y.to(device)
@@ -93,6 +170,19 @@ def evaluate(model, mode):
             ys_true.append(y_true)
             ys_pred.append(y_pred)
             losses.append(masked_mae_loss(y_pred, y_true).item())
+            
+            pos_t=pos[:int(pos.shape[0]/2),:,:]# B,N,D
+            pos_his=pos[int(pos.shape[0]/2):,:,:]
+            pos_t=pos_t.reshape(-1,pos.shape[-1])
+            pos_his=pos_his.reshape(-1,pos.shape[-1])
+
+            rows_equal = torch.all(pos_t == pos_his, axis=1)
+
+            # Count the number of rows that are different
+            num_different_rows = torch.sum(~rows_equal).item()
+            diff_num+=num_different_rows
+            
+        logger.info('-' * 3 + 'Different Case on '+str(mode)+' Meta Nodes: ' + str(diff_num))
         
         ys_true, ys_pred = torch.cat(ys_true, dim=0), torch.cat(ys_pred, dim=0)
         loss = masked_mae_loss(ys_pred, ys_true)
@@ -120,10 +210,12 @@ def evaluate(model, mode):
 
     
 def traintest_model():  
-    # huber=nn.HuberLoss()
+    custom_loss_d = custom_loss(init_margin=args.margin_newD)
     model = get_model()
     print_model(model)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, eps=args.epsilon, weight_decay=args.weight_decay)
+    
+    # optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, eps=args.epsilon, weight_decay=args.weight_decay)
+    optimizer = torch.optim.Adam([{'params': model.parameters(), 'lr':args.lr}, {'params': [custom_loss_d.margin],'lr':0.1}], eps=args.epsilon, weight_decay=args.weight_decay)
     lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.steps, gamma=args.lr_decay_ratio)
     min_val_loss = float('inf')
     wait = 0
@@ -133,6 +225,9 @@ def traintest_model():
         model = model.train()
         data_iter = data['train_loader']
         losses, mae_losses, contra_losses, detect_losses, XQ_losses, XP_losses = [], [], [], [], [], []
+        # x_pos_count, x_neg_count, x_his_pos_count, x_his_neg_count=[0]*args.mem_num, [0]*args.mem_num, [0]*args.mem_num, [0]*args.mem_num
+        meta_hit_count=np.zeros(shape=(4, args.mem_num), dtype=np.int64)
+        loss_normal_count, loss_abnormal_count=0, 0
         for x, y in data_iter:
             optimizer.zero_grad()
             x = x.to(device)
@@ -141,12 +236,36 @@ def traintest_model():
             output, h_att, query, pos, neg, mask, query_simi, pos_simi, mask_simi = model(x, x_cov, x_his, y_cov, scaler.transform(y), batches_seen)
             y_pred = scaler.inverse_transform(output)
             y_true = y
+
+            mask=mask.long().detach().cpu().numpy()
+            x_pn_idx=mask[0] # (B, N, 2)
+            x_his_pn_idx=mask[1] # (B, N, 2)
+            
+            batch_size, num_nodes=x_pn_idx.shape[0], x_pn_idx.shape[1]
+            x_pn_idx=x_pn_idx.reshape(batch_size*num_nodes, 2) # (BN, 2)
+            x_his_pn_idx=x_his_pn_idx.reshape(batch_size*num_nodes, 2) # (BN, 2)
+            
+            x_pos, x_pos_count=np.unique(x_pn_idx[:, 0], return_counts=True)
+            x_neg, x_neg_count=np.unique(x_pn_idx[:, 1], return_counts=True)
+            x_his_pos, x_his_pos_count=np.unique(x_his_pn_idx[:, 0], return_counts=True)
+            x_his_neg, x_his_neg_count=np.unique(x_his_pn_idx[:, 1], return_counts=True)
+            meta_hit_count[0, x_pos]+=x_pos_count
+            meta_hit_count[1, x_neg]+=x_neg_count
+            meta_hit_count[2, x_his_pos]+=x_his_pos_count
+            meta_hit_count[3, x_his_neg]+=x_his_neg_count
+            # for i in range(x_pn_idx.shape[0]):
+            #     for j in range(x_pn_idx.shape[1]):
+            #         meta_hit_count[0, x_pn_idx[i, j, 0]]+=1
+            #         meta_hit_count[1, x_pn_idx[i, j, 1]]+=1
+            #         meta_hit_count[2, x_his_pn_idx[i, j, 0]]+=1
+            #         meta_hit_count[3, x_his_pn_idx[i, j, 1]]+=1
+            
             mae_loss = masked_mae_loss(y_pred, y_true) # masked_mae_loss(y_pred, y_true)
             # mae_loss=huber(y_pred, y_true)
             separate_loss = ContrastiveLoss(contra_loss=args.contra_loss, mask=mask, temp=args.temp)
             # when use triplet: mask is None
             loss_c = separate_loss.calculate(query[0], pos[0], neg[0], mask[0])
-            loss_c += separate_loss.calculate(query[1], pos[1], neg[1], mask[1])
+            # loss_c += separate_loss.calculate(query[1], pos[1], neg[1], mask[1])
             
             # if args.compact_loss == 'mse':
             #     compact_loss = nn.MSELoss()
@@ -167,16 +286,26 @@ def traintest_model():
             # else:
             #     pass
             
-            loss_d = F.l1_loss(query_simi, pos_simi)
+            x_inv, x_his_inv = scaler.inverse_transform(x), scaler.inverse_transform(x_his)
+            x_simi = torch.cosine_similarity(x_inv, x_his_inv, dim=1).squeeze() # BTN1 -> BN
+            # x_dis = torch.abs(x - x_his).mean(dim=1).squeeze()  # B,N
+            
+            # loss_d = F.l1_loss(query_simi, pos_simi)
+            
+            # loss_d = (torch.relu(torch.abs(query_simi - pos_simi))).sum(dim=-1).mean()
+            
+            # loss_d = custom_loss_d(x_inv, x_his_inv, pos_simi).sum(dim=-1).mean()
+            
+            loss_d, abnormal_count, normal_count = custom_loss_d(x, x_his, pos_simi)
+            loss_abnormal_count+=abnormal_count
+            loss_normal_count+=normal_count
             
             # loss_d = 1 - torch.cosine_similarity(query_simi, pos_simi, dim=-1).mean()
             
-            x_simi = torch.cosine_similarity(x, x_his, dim=1).squeeze() # BTN1 -> BN
-            
-            # loss_xq = 1 - torch.cosine_similarity(query_simi, x_simi, dim=-1).mean()
+            loss_xq = 1 - torch.cosine_similarity(query_simi, x_simi, dim=-1).mean()
             
             # 给abnormal case加高权重
-            loss_xq = ((1 - x_simi) * torch.abs(query_simi - x_simi)).sum(dim=-1).mean()
+            # loss_xq = ((1 - x_simi) * torch.abs(query_simi - x_simi)).sum(dim=-1).mean()
             
             # loss_d = ((1 - x_simi) * torch.abs(query_simi - pos_simi)).sum(dim=-1).mean()
             
@@ -208,7 +337,11 @@ def traintest_model():
         end_time2 = time.time()
         message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, train_mae_loss: {:.4f}, train_contra_loss: {:.4f}, train_detect_loss: {:.4f}, train_XQ_loss: {:.4f}, train_XP_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.1f}s'.format(epoch_num + 1, args.epochs, batches_seen, train_loss, train_mae_loss, train_contra_loss, train_detect_loss, train_XQ_loss, train_XP_loss, val_loss, optimizer.param_groups[0]['lr'], (end_time2 - start_time))
         logger.info(message)
+        logger.info("Margin:", custom_loss_d.margin.item())
+        logger.info(f"Abnormal x_dis>margin count: {loss_abnormal_count}; Normal x_dis<=margin count: {loss_normal_count}")
+        logger.info(f"x_pos_count, x_neg_count, x_his_pos_count, x_his_neg_count:\n{meta_hit_count}")
         test_loss, _, _ = evaluate(model, 'test')
+        logger.info("\n")
         
         # if (epoch_num + 1) in [5, 10, 20, 40]:
         #     torch.save(model.state_dict(), f"LA_CD_trip_ep{epoch_num + 1}.pt")
@@ -265,9 +398,10 @@ parser.add_argument('--temp', type=float, default=1.0, help='temperature paramet
 # parser.add_argument('--lamb1', type=float, default=0.0, help='compact loss lambda')
 parser.add_argument('--lamb_c', type=float, default=0.1, help='contra loss lambda') 
 parser.add_argument('--lamb_d', type=float, default=1.0, help='anomaly detection loss lambda') 
-parser.add_argument('--lamb_xq', type=float, default=1.0, help='X-Q loss lambda')
-parser.add_argument('--lamb_xp', type=float, default=1.0, help='X-P loss lambda')
-parser.add_argument('--contra_loss', type=str, choices=['triplet', 'infonce'], default='infonce', help='whether to triplet or infonce contra loss')
+parser.add_argument('--lamb_xq', type=float, default=0, help='X-Q loss lambda')
+parser.add_argument('--lamb_xp', type=float, default=0, help='X-P loss lambda')
+parser.add_argument('--margin_newD', type=float, default=5.0, help='margin of new D loss')
+parser.add_argument('--contra_loss', type=str, choices=['triplet', 'infonce'], default='triplet', help='whether to triplet or infonce contra loss')
 parser.add_argument('--compact_loss', type=str, choices=['mse', 'rmse', 'mae'], default='mse', help='which method to calculate compact loss')
 parser.add_argument('--detect_loss', type=str, choices=['mse', 'rmse', 'mae'], default='mae', help='which method to calculate detect loss')
 parser.add_argument("--use_mask", type=eval, choices=[True, False], default='False', help="use mask to calculate detect loss")
@@ -294,6 +428,7 @@ if args.dataset == 'METRLA':
     args.lamb_xp=0
     
     args.contra_loss="triplet"
+    args.margin_newD=0.5
     
     # args.rnn_layers=3
     
@@ -307,7 +442,7 @@ if args.dataset == 'METRLA':
     # args.max_grad_norm=5
     # args.rnn_units=128
     # args.embed_dim=10
-    # args.mem_num=8
+    # args.mem_num=2
     # args.mem_dim=64
     # args.cl_decay_steps=6000
     # args.max_diffusion_step=3
@@ -322,7 +457,7 @@ elif args.dataset == 'PEMSBAY':
     args.cl_decay_steps = 8000
     args.steps = [10, 150]
     
-    args.seed=666
+    args.seed=777
     # args.lamb_c=0
     # args.lamb_d=0
     
@@ -420,7 +555,7 @@ elif args.dataset == 'PEMS08':
     args.rnn_units = 16 #optimal
     
     # args.lamb_c=0
-    args.lamb_d=1.5
+    args.lamb_d=1
     
     args.seed=999
     
