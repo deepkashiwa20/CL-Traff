@@ -461,7 +461,7 @@ elif args.dataset == 'PEMSBAY':
     # args.lamb_c=0
     # args.lamb_d=0
     
-    # args.patience=10
+    # args.patience=50
     # args.batch_size=16
     # args.lr=0.001
     # args.steps=[50, 100]
