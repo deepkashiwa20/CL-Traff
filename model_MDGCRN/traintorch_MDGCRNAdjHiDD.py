@@ -19,12 +19,14 @@ from MDGCRNAdjHiDD import MDGCRNAdjHiDD
 class custom_loss(nn.Module):
     def __init__(self, init_margin=5):
         super(custom_loss, self).__init__()
-        self.margin = torch.tensor(init_margin)
+        # self.margin = torch.tensor(init_margin)
         # self.margin = nn.Parameter(torch.tensor(init_margin))
-        # self.margin = nn.Parameter(torch.tensor(np.random.random()))
+        self.margin = nn.Parameter(torch.tensor(np.random.random()))
         # self.margin = nn.Parameter(torch.randn(size=(207,)))
         # self.hinge = nn.HingeEmbeddingLoss(5)
         # self.meta_dist_limit=nn.Parameter(torch.tensor(np.random.random()))
+        
+        # self.eps=1e-5
 
     def forward(self, x, x_his, meta_dist):
         """
@@ -69,7 +71,11 @@ class custom_loss(nn.Module):
         
         # x_cos = torch.cosine_similarity(x, x_his, dim=1).squeeze() # BTN1 -> BN
         # loss = torch.relu((1-x_cos)*torch.sign(mae-self.margin)*(self.margin-meta_dist))
-        loss = torch.relu(torch.sign(x_dis-self.margin)*(self.margin-meta_dist))
+        
+        # loss = torch.relu(torch.sign(x_dis-self.margin)*(self.margin-meta_dist))
+        
+        # loss = torch.where(x_dis<self.margin, meta_dist, 1/(meta_dist+self.eps))
+        # loss = (meta_dist+1e-5)**torch.sign(-x_dis+self.margin)
         
         # loss = torch.sign(x_dis-margin)*(-margin-meta_dist)
         
@@ -83,6 +89,8 @@ class custom_loss(nn.Module):
         
         # loss = torch.relu(torch.sign(x_dis-self.margin)*(self.meta_dist_limit-meta_dist))
         # loss = torch.exp(torch.sign(x_dis-self.margin)*(-meta_dist))
+        
+        loss = F.relu(meta_dist - self.margin)
         
         loss = loss.sum(dim=-1).mean()
         
@@ -108,7 +116,9 @@ class ContrastiveLoss():
         """
         if not self.infonce:
             separate_loss = nn.TripletMarginLoss(margin=self.margin)
-            return separate_loss(query, pos.detach(), neg.detach())
+            # return separate_loss(query, pos.detach(), neg.detach())
+            # return separate_loss(query, pos, neg)
+            return separate_loss(query.detach(), pos, neg)
         else:
             # print(query.shape, pos.shape, neg.shape)
             score_matrix = F.cosine_similarity(query.unsqueeze(-2), neg, dim=-1)  # (B, N, M)
@@ -253,6 +263,7 @@ def traintest_model():
             meta_hit_count[1, x_neg]+=x_neg_count
             meta_hit_count[2, x_his_pos]+=x_his_pos_count
             meta_hit_count[3, x_his_neg]+=x_his_neg_count
+            
             # for i in range(x_pn_idx.shape[0]):
             #     for j in range(x_pn_idx.shape[1]):
             #         meta_hit_count[0, x_pn_idx[i, j, 0]]+=1
@@ -290,15 +301,15 @@ def traintest_model():
             x_simi = torch.cosine_similarity(x_inv, x_his_inv, dim=1).squeeze() # BTN1 -> BN
             # x_dis = torch.abs(x - x_his).mean(dim=1).squeeze()  # B,N
             
-            # loss_d = F.l1_loss(query_simi, pos_simi)
+            loss_d = F.l1_loss(query_simi.detach(), pos_simi)
             
             # loss_d = (torch.relu(torch.abs(query_simi - pos_simi))).sum(dim=-1).mean()
             
             # loss_d = custom_loss_d(x_inv, x_his_inv, pos_simi).sum(dim=-1).mean()
             
-            loss_d, abnormal_count, normal_count = custom_loss_d(x, x_his, pos_simi)
-            loss_abnormal_count+=abnormal_count
-            loss_normal_count+=normal_count
+            # loss_d, abnormal_count, normal_count = custom_loss_d(x, x_his, pos_simi)
+            # loss_abnormal_count+=abnormal_count
+            # loss_normal_count+=normal_count
             
             # loss_d = 1 - torch.cosine_similarity(query_simi, pos_simi, dim=-1).mean()
             
@@ -326,6 +337,8 @@ def traintest_model():
             if args.max_grad_norm:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm) # gradient clipping - this does it in place
             optimizer.step()
+            
+        end_time2 = time.time()
         train_loss = np.mean(losses)
         train_mae_loss = np.mean(mae_losses) 
         train_contra_loss = np.mean(contra_losses)
@@ -334,11 +347,10 @@ def traintest_model():
         train_XP_loss = np.mean(XP_losses)
         lr_scheduler.step()
         val_loss, _, _ = evaluate(model, 'val')
-        end_time2 = time.time()
-        message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, train_mae_loss: {:.4f}, train_contra_loss: {:.4f}, train_detect_loss: {:.4f}, train_XQ_loss: {:.4f}, train_XP_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.1f}s'.format(epoch_num + 1, args.epochs, batches_seen, train_loss, train_mae_loss, train_contra_loss, train_detect_loss, train_XQ_loss, train_XP_loss, val_loss, optimizer.param_groups[0]['lr'], (end_time2 - start_time))
+        message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, train_mae_loss: {:.4f}, train_contra_loss: {:.4f}, train_detect_loss: {:.4f}, train_XQ_loss: {:.4f}, train_XP_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.2f}s'.format(epoch_num + 1, args.epochs, batches_seen, train_loss, train_mae_loss, train_contra_loss, train_detect_loss, train_XQ_loss, train_XP_loss, val_loss, optimizer.param_groups[0]['lr'], (end_time2 - start_time))
         logger.info(message)
-        logger.info("Margin:", custom_loss_d.margin.item())
-        logger.info(f"Abnormal x_dis>margin count: {loss_abnormal_count}; Normal x_dis<=margin count: {loss_normal_count}")
+        # logger.info("Margin:", custom_loss_d.margin.item())
+        # logger.info(f"Abnormal x_dis>margin count: {loss_abnormal_count}; Normal x_dis<=margin count: {loss_normal_count}")
         logger.info(f"x_pos_count, x_neg_count, x_his_pos_count, x_his_neg_count:\n{meta_hit_count}")
         test_loss, _, _ = evaluate(model, 'test')
         logger.info("\n")
@@ -361,7 +373,10 @@ def traintest_model():
     logger.info('=' * 22 + 'Better results might be found from model at different epoch' + '=' * 22)
     model = get_model()
     model.load_state_dict(torch.load(modelpt_path))
+    start=time.time()
     test_loss, _, _ = evaluate(model, 'test')
+    end=time.time()
+    logger.info(f"Inference Time: {(end-start):.2f}s")
 
 #########################################################################################    
 parser = argparse.ArgumentParser()
@@ -400,7 +415,7 @@ parser.add_argument('--lamb_c', type=float, default=0.1, help='contra loss lambd
 parser.add_argument('--lamb_d', type=float, default=1.0, help='anomaly detection loss lambda') 
 parser.add_argument('--lamb_xq', type=float, default=0, help='X-Q loss lambda')
 parser.add_argument('--lamb_xp', type=float, default=0, help='X-P loss lambda')
-parser.add_argument('--margin_newD', type=float, default=5.0, help='margin of new D loss')
+parser.add_argument('--margin_newD', type=float, default=5, help='margin of new D loss')
 parser.add_argument('--contra_loss', type=str, choices=['triplet', 'infonce'], default='triplet', help='whether to triplet or infonce contra loss')
 parser.add_argument('--compact_loss', type=str, choices=['mse', 'rmse', 'mae'], default='mse', help='which method to calculate compact loss')
 parser.add_argument('--detect_loss', type=str, choices=['mse', 'rmse', 'mae'], default='mae', help='which method to calculate detect loss')
@@ -421,14 +436,14 @@ if args.dataset == 'METRLA':
     args.num_nodes = 207
     args.use_STE=False
     
-    args.seed=888
+    args.seed=345
     args.lamb_c=0.1
     args.lamb_d=1
     args.lamb_xq=0
     args.lamb_xp=0
     
     args.contra_loss="triplet"
-    args.margin_newD=0.5
+    args.margin_newD=5
     
     # args.rnn_layers=3
     
@@ -442,7 +457,7 @@ if args.dataset == 'METRLA':
     # args.max_grad_norm=5
     # args.rnn_units=128
     # args.embed_dim=10
-    # args.mem_num=2
+    # args.mem_num=20
     # args.mem_dim=64
     # args.cl_decay_steps=6000
     # args.max_diffusion_step=3
@@ -454,12 +469,18 @@ elif args.dataset == 'PEMSBAY':
     adj_mx_path = f'../{args.dataset}/adj_mx_bay.pkl'
     args.num_nodes = 325
     args.use_STE=False
+    
     args.cl_decay_steps = 8000
     args.steps = [10, 150]
     
-    args.seed=777
-    # args.lamb_c=0
-    # args.lamb_d=0
+    args.seed=666
+    
+    args.contra_loss="triplet"
+    args.margin_newD=5
+    
+    args.lamb_c=0.00001
+    args.lamb_d=1
+    # args.use_curriculum_learning=False
     
     # args.patience=50
     # args.batch_size=16
@@ -469,7 +490,7 @@ elif args.dataset == 'PEMSBAY':
     # args.max_grad_norm=5
     # args.rnn_units=128
     # args.embed_dim=10
-    # args.mem_num=20
+    # args.mem_num=10
     # args.mem_dim=64
     # args.cl_decay_steps=6000
     # args.max_diffusion_step=3
@@ -485,32 +506,10 @@ elif args.dataset == 'PEMS03':
     # args.rnn_units = 32
     # args.lamb_d = 1.5
     
-    args.patience=10
-    args.batch_size=16
-    args.lr=0.001
-    args.steps=[50, 100]
-    args.weight_decay=0
-    args.max_grad_norm=0
-    args.rnn_units=32
-    args.embed_dim=16
-    args.mem_num=20
-    args.mem_dim=64
-    args.cl_decay_steps=6000
-    args.max_diffusion_step=3
-    args.lamb_c=0.000001
-    args.lamb_d=2
-    
-elif args.dataset == 'PEMS04':
-    data_path = f'../{args.dataset}/{args.dataset}.npz'
-    adj_mx_path = f'../{args.dataset}/adj_{args.dataset}_distance.pkl'
-    args.num_nodes = num_nodes_dict[args.dataset]
-    
-    # args.steps = [100]
-    # args.rnn_units = 32 #optimal
-    # args.lamb_c=0
-    # args.lamb_d=1
-    
     args.seed=999
+    
+    args.contra_loss="triplet"
+    args.margin_newD=5
     
     args.patience=30
     args.batch_size=16
@@ -524,15 +523,50 @@ elif args.dataset == 'PEMS04':
     args.mem_dim=64
     args.cl_decay_steps=6000
     args.max_diffusion_step=3
-    args.lamb_c=0.0001
-    args.lamb_d=2
+    args.lamb_c=0.1
+    args.lamb_d=1
+    
+elif args.dataset == 'PEMS04':
+    data_path = f'../{args.dataset}/{args.dataset}.npz'
+    adj_mx_path = f'../{args.dataset}/adj_{args.dataset}_distance.pkl'
+    args.num_nodes = num_nodes_dict[args.dataset]
+    
+    # args.steps = [100]
+    # args.rnn_units = 32 #optimal
+    # args.lamb_c=0
+    # args.lamb_d=1
+    
+    args.seed=999
+    
+    args.contra_loss="triplet"
+    args.margin_newD=15
+    
+    args.patience=30
+    args.batch_size=16
+    args.lr=0.001
+    args.steps=[50, 100]
+    args.weight_decay=0
+    args.max_grad_norm=0
+    args.rnn_units=32
+    args.embed_dim=16
+    args.mem_num=20
+    args.mem_dim=64
+    args.cl_decay_steps=6000
+    args.max_diffusion_step=3
+    args.lamb_c=0.00001
+    args.lamb_d=1
     
 elif args.dataset == 'PEMS07':
     data_path = f'../{args.dataset}/{args.dataset}.npz'
     adj_mx_path = f'../{args.dataset}/adj_{args.dataset}_distance.pkl'
     args.num_nodes = num_nodes_dict[args.dataset]
     
-    args.patience=10
+    args.contra_loss="triplet"
+    args.margin_newD=15
+    
+    # args.epochs=3
+    
+    args.patience=20
     args.batch_size=16
     args.lr=0.001
     args.steps=[50, 100]
@@ -544,8 +578,8 @@ elif args.dataset == 'PEMS07':
     args.mem_dim=64
     args.cl_decay_steps=6000
     args.max_diffusion_step=3
-    args.lamb_c=0.0001
-    args.lamb_d=2
+    args.lamb_c=0.01
+    args.lamb_d=1
     
 elif args.dataset == 'PEMS08':
     data_path = f'../{args.dataset}/{args.dataset}.npz'
@@ -554,11 +588,15 @@ elif args.dataset == 'PEMS08':
     args.steps = [100]
     args.rnn_units = 16 #optimal
     
-    # args.lamb_c=0
+    args.lamb_c=0.1
     args.lamb_d=1
     
     args.seed=999
     
+    args.contra_loss="triplet"
+    args.margin_newD=5
+    
+    # args.epochs=3
     # args.patience=10
     # args.batch_size=16
     # args.lr=0.001
@@ -580,6 +618,9 @@ elif args.dataset == 'PEMSD7M':
     args.num_nodes = num_nodes_dict[args.dataset]
     # args.use_STE = False
     
+    args.contra_loss="triplet"
+    args.margin_newD=5
+    
     args.patience=30
     args.batch_size=16
     args.lr=0.001
@@ -592,8 +633,8 @@ elif args.dataset == 'PEMSD7M':
     args.mem_dim=64
     args.cl_decay_steps=4000
     args.max_diffusion_step=3
-    args.lamb_c=0.0001
-    args.lamb_d=2
+    args.lamb_c=0.1
+    args.lamb_d=1
 
     
 model_name = 'MDGCRNAdjHiDD'

@@ -197,14 +197,27 @@ class MDGCRNAdjHiDD(nn.Module):
         # mem[0]+=noise
         # mem[1]-=noise
         # mem[1]=mem[0]*0.9
+        
         memory_dict['Memory'] = nn.Parameter(mem, requires_grad=True)     # (M, d)
-        # memory_dict['Wq'] = nn.Parameter(torch.randn(self.rnn_units, self.mem_dim), requires_grad=True)    # project to query
+        memory_dict['Wq'] = nn.Parameter(torch.randn(self.rnn_units, self.mem_dim), requires_grad=True)    # project to query
+        # memory_dict['Wq'] = nn.Linear(self.rnn_units, self.mem_dim)
+        # memory_dict['bias'] = nn.init.zeros_(nn.Parameter(torch.empty(self.mem_dim)))
+        
         for param in memory_dict.values():
             nn.init.xavier_normal_(param)
+        # nn.init.xavier_normal_(memory_dict['Memory'])
+        # nn.init.normal_(memory_dict['Memory'])
+        # nn.init.xavier_normal_(memory_dict['Wq'])
+        
         return memory_dict
     
     def query_memory(self, h_t:torch.Tensor):
         query = torch.matmul(h_t, self.memory['Wq'])     # (B, N, d)
+        # query = self.memory['Wq'](h_t)
+        # query = torch.matmul(h_t, self.memory['Wq']) + self.memory['bias']
+        
+        # query = (query - query.mean(dim=-1, keepdim=True)) / query.std(dim=-1, keepdim=True)
+        
         att_score = torch.softmax(torch.matmul(query, self.memory['Memory'].t()), dim=-1)         # alpha: (B, N, M)
         value = torch.matmul(att_score, self.memory['Memory'])     # (B, N, d)
         _, ind = torch.topk(att_score, k=2, dim=-1)
