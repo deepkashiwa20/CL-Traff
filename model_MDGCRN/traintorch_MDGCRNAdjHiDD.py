@@ -181,18 +181,18 @@ def evaluate(model, mode):
             ys_pred.append(y_pred)
             losses.append(masked_mae_loss(y_pred, y_true).item())
             
-            pos_t=pos[:int(pos.shape[0]/2),:,:]# B,N,D
-            pos_his=pos[int(pos.shape[0]/2):,:,:]
-            pos_t=pos_t.reshape(-1,pos.shape[-1])
-            pos_his=pos_his.reshape(-1,pos.shape[-1])
+            # pos_t=pos[:int(pos.shape[0]/2),:,:]# B,N,D
+            # pos_his=pos[int(pos.shape[0]/2):,:,:]
+            # pos_t=pos_t.reshape(-1,pos.shape[-1])
+            # pos_his=pos_his.reshape(-1,pos.shape[-1])
 
-            rows_equal = torch.all(pos_t == pos_his, axis=1)
+            # rows_equal = torch.all(pos_t == pos_his, axis=1)
 
-            # Count the number of rows that are different
-            num_different_rows = torch.sum(~rows_equal).item()
-            diff_num+=num_different_rows
+            # # Count the number of rows that are different
+            # num_different_rows = torch.sum(~rows_equal).item()
+            # diff_num+=num_different_rows
             
-        logger.info('-' * 3 + 'Different Case on '+str(mode)+' Meta Nodes: ' + str(diff_num))
+        # logger.info('-' * 3 + 'Different Case on '+str(mode)+' Meta Nodes: ' + str(diff_num))
         
         ys_true, ys_pred = torch.cat(ys_true, dim=0), torch.cat(ys_pred, dim=0)
         loss = masked_mae_loss(ys_pred, ys_true)
@@ -234,8 +234,7 @@ def traintest_model():
         start_time = time.time()
         model = model.train()
         data_iter = data['train_loader']
-        losses, mae_losses, contra_losses, detect_losses, XQ_losses, XP_losses = [], [], [], [], [], []
-        # x_pos_count, x_neg_count, x_his_pos_count, x_his_neg_count=[0]*args.mem_num, [0]*args.mem_num, [0]*args.mem_num, [0]*args.mem_num
+        losses, mae_losses, contra_losses, detect_losses = [], [], [], []
         meta_hit_count=np.zeros(shape=(4, args.mem_num), dtype=np.int64)
         loss_normal_count, loss_abnormal_count=0, 0
         for x, y in data_iter:
@@ -247,90 +246,37 @@ def traintest_model():
             y_pred = scaler.inverse_transform(output)
             y_true = y
 
-            mask=mask.long().detach().cpu().numpy()
-            x_pn_idx=mask[0] # (B, N, 2)
-            x_his_pn_idx=mask[1] # (B, N, 2)
+            # mask=mask.long().detach().cpu().numpy()
+            # x_pn_idx=mask[0] # (B, N, 2)
+            # x_his_pn_idx=mask[1] # (B, N, 2)
             
-            batch_size, num_nodes=x_pn_idx.shape[0], x_pn_idx.shape[1]
-            x_pn_idx=x_pn_idx.reshape(batch_size*num_nodes, 2) # (BN, 2)
-            x_his_pn_idx=x_his_pn_idx.reshape(batch_size*num_nodes, 2) # (BN, 2)
+            # batch_size, num_nodes=x_pn_idx.shape[0], x_pn_idx.shape[1]
+            # x_pn_idx=x_pn_idx.reshape(batch_size*num_nodes, 2) # (BN, 2)
+            # x_his_pn_idx=x_his_pn_idx.reshape(batch_size*num_nodes, 2) # (BN, 2)
             
-            x_pos, x_pos_count=np.unique(x_pn_idx[:, 0], return_counts=True)
-            x_neg, x_neg_count=np.unique(x_pn_idx[:, 1], return_counts=True)
-            x_his_pos, x_his_pos_count=np.unique(x_his_pn_idx[:, 0], return_counts=True)
-            x_his_neg, x_his_neg_count=np.unique(x_his_pn_idx[:, 1], return_counts=True)
-            meta_hit_count[0, x_pos]+=x_pos_count
-            meta_hit_count[1, x_neg]+=x_neg_count
-            meta_hit_count[2, x_his_pos]+=x_his_pos_count
-            meta_hit_count[3, x_his_neg]+=x_his_neg_count
-            
-            # for i in range(x_pn_idx.shape[0]):
-            #     for j in range(x_pn_idx.shape[1]):
-            #         meta_hit_count[0, x_pn_idx[i, j, 0]]+=1
-            #         meta_hit_count[1, x_pn_idx[i, j, 1]]+=1
-            #         meta_hit_count[2, x_his_pn_idx[i, j, 0]]+=1
-            #         meta_hit_count[3, x_his_pn_idx[i, j, 1]]+=1
+            # x_pos, x_pos_count=np.unique(x_pn_idx[:, 0], return_counts=True)
+            # x_neg, x_neg_count=np.unique(x_pn_idx[:, 1], return_counts=True)
+            # x_his_pos, x_his_pos_count=np.unique(x_his_pn_idx[:, 0], return_counts=True)
+            # x_his_neg, x_his_neg_count=np.unique(x_his_pn_idx[:, 1], return_counts=True)
+            # meta_hit_count[0, x_pos]+=x_pos_count
+            # meta_hit_count[1, x_neg]+=x_neg_count
+            # meta_hit_count[2, x_his_pos]+=x_his_pos_count
+            # meta_hit_count[3, x_his_neg]+=x_his_neg_count
             
             mae_loss = masked_mae_loss(y_pred, y_true) # masked_mae_loss(y_pred, y_true)
-            # mae_loss=huber(y_pred, y_true)
             separate_loss = ContrastiveLoss(contra_loss=args.contra_loss, mask=mask, temp=args.temp)
             # when use triplet: mask is None
             loss_c = separate_loss.calculate(query[0], pos[0], neg[0], mask[0])
             # loss_c += separate_loss.calculate(query[1], pos[1], neg[1], mask[1])
             
-            # if args.compact_loss == 'mse':
-            #     compact_loss = nn.MSELoss()
-            # elif args.compact_loss == 'rmse':
-            #     compact_loss = RMSE
-            # elif args.compact_loss == 'mae':
-            #     compact_loss = MAE
-            # else:
-            #     pass
-            # loss_compact = compact_loss(query, pos.detach())
-            
-            # if args.detect_loss == 'mse':
-            #     detect_loss = nn.MSELoss()
-            # elif args.detect_loss == 'rmse':
-            #     detect_loss = RMSE
-            # elif args.detect_loss == 'mae':
-            #     detect_loss = nn.L1Loss()
-            # else:
-            #     pass
-            
-            x_inv, x_his_inv = scaler.inverse_transform(x), scaler.inverse_transform(x_his)
-            x_simi = torch.cosine_similarity(x_inv, x_his_inv, dim=1).squeeze() # BTN1 -> BN
-            # x_dis = torch.abs(x - x_his).mean(dim=1).squeeze()  # B,N
-            
             loss_d = F.l1_loss(query_simi.detach(), pos_simi)
             
-            # loss_d = (torch.relu(torch.abs(query_simi - pos_simi))).sum(dim=-1).mean()
-            
-            # loss_d = custom_loss_d(x_inv, x_his_inv, pos_simi).sum(dim=-1).mean()
-            
-            # loss_d, abnormal_count, normal_count = custom_loss_d(x, x_his, pos_simi)
-            # loss_abnormal_count+=abnormal_count
-            # loss_normal_count+=normal_count
-            
-            # loss_d = 1 - torch.cosine_similarity(query_simi, pos_simi, dim=-1).mean()
-            
-            loss_xq = 1 - torch.cosine_similarity(query_simi, x_simi, dim=-1).mean()
-            
-            # 给abnormal case加高权重
-            # loss_xq = ((1 - x_simi) * torch.abs(query_simi - x_simi)).sum(dim=-1).mean()
-            
-            # loss_d = ((1 - x_simi) * torch.abs(query_simi - pos_simi)).sum(dim=-1).mean()
-            
-            loss_xp = 1 - torch.cosine_similarity(x_simi, pos_simi, dim=-1).mean()
-            # loss_xp = F.l1_loss(x_simi, pos_simi)
-            
-            loss = mae_loss + args.lamb_c * loss_c + args.lamb_d * loss_d + args.lamb_xq * loss_xq + args.lamb_xp * loss_xp
+            loss = mae_loss + args.lamb_c * loss_c + args.lamb_d * loss_d
             
             losses.append(loss.item())
             mae_losses.append(mae_loss.item())
             contra_losses.append(loss_c.item())
             detect_losses.append(loss_d.item())
-            XQ_losses.append(loss_xq.item())
-            XP_losses.append(loss_xp.item())
             losses.append(loss.item())
             batches_seen += 1
             loss.backward()
@@ -343,15 +289,12 @@ def traintest_model():
         train_mae_loss = np.mean(mae_losses) 
         train_contra_loss = np.mean(contra_losses)
         train_detect_loss = np.mean(detect_losses)
-        train_XQ_loss = np.mean(XQ_losses)
-        train_XP_loss = np.mean(XP_losses)
         lr_scheduler.step()
         val_loss, _, _ = evaluate(model, 'val')
-        message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, train_mae_loss: {:.4f}, train_contra_loss: {:.4f}, train_detect_loss: {:.4f}, train_XQ_loss: {:.4f}, train_XP_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.2f}s'.format(epoch_num + 1, args.epochs, batches_seen, train_loss, train_mae_loss, train_contra_loss, train_detect_loss, train_XQ_loss, train_XP_loss, val_loss, optimizer.param_groups[0]['lr'], (end_time2 - start_time))
+        message = 'Epoch [{}/{}] ({}) train_loss: {:.4f}, train_mae_loss: {:.4f}, train_contra_loss: {:.4f}, train_detect_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.2f}s'.format(epoch_num + 1, args.epochs, batches_seen, train_loss, train_mae_loss, train_contra_loss, train_detect_loss, val_loss, optimizer.param_groups[0]['lr'], (end_time2 - start_time))
         logger.info(message)
-        # logger.info("Margin:", custom_loss_d.margin.item())
-        # logger.info(f"Abnormal x_dis>margin count: {loss_abnormal_count}; Normal x_dis<=margin count: {loss_normal_count}")
-        logger.info(f"x_pos_count, x_neg_count, x_his_pos_count, x_his_neg_count:\n{meta_hit_count}")
+        # logger.info(f"x_pos_count, x_neg_count, x_his_pos_csount, x_his_neg_count:\n{meta_hit_count}")
+        
         test_loss, _, _ = evaluate(model, 'test')
         logger.info("\n")
         
@@ -617,6 +560,8 @@ elif args.dataset == 'PEMSD7M':
     adj_mx_path = f'../{args.dataset}/adj_{args.dataset}_distance.pkl'
     args.num_nodes = num_nodes_dict[args.dataset]
     # args.use_STE = False
+    
+    args.seed=666
     
     args.contra_loss="triplet"
     args.margin_newD=5
