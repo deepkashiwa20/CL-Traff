@@ -141,7 +141,7 @@ class ADCRNN_Decoder(nn.Module):
         return current_inputs, output_hidden
 
 
-class MDGCRN_NoMem(nn.Module):
+class MDGCRN_woSSDL(nn.Module):
     def __init__(
         self,
         num_nodes=207,
@@ -159,7 +159,7 @@ class MDGCRN_NoMem(nn.Module):
         use_STE=False,
         device="cpu",
     ):
-        super(MDGCRN_NoMem, self).__init__()
+        super(MDGCRN_woSSDL, self).__init__()
         self.num_nodes = num_nodes
         self.input_dim = input_dim
         self.rnn_units = rnn_units
@@ -232,7 +232,8 @@ class MDGCRN_NoMem(nn.Module):
         self.proj = nn.Linear(self.decoder_dim, self.output_dim)
 
         # graph
-        self.hypernet = nn.Linear(self.rnn_units*2, self.embed_dim)
+        # self.hypernet = nn.Linear(self.rnn_units*2, self.embed_dim)
+        self.hypernet = nn.Linear(self.rnn_units, self.embed_dim)
 
     def compute_sampling_threshold(self, batches_seen):
         return self.tf_decay_steps / (
@@ -242,7 +243,7 @@ class MDGCRN_NoMem(nn.Module):
     def forward(self, x, x_cov, x_his, y_cov, labels=None, batches_seen=None):
         if self.use_STE:
             x = self.input_proj(x)  # [B,T,N,1]->[B,T,N,D]
-            x_his = self.input_proj(x_his)  # [B,T,N,1]->[B,T,N,D]
+            # x_his = self.input_proj(x_his)  # [B,T,N,1]->[B,T,N,D]
             node_emb = self.node_embedding.expand(
                 x.shape[0], self.horizon, *self.node_embedding.shape
             )  # [B,T,N,d]
@@ -250,7 +251,7 @@ class MDGCRN_NoMem(nn.Module):
                 (x_cov.squeeze() * self.TDAY).long()
             ]  # [B, T, N, d]
             x = torch.cat([x, node_emb, time_emb], dim=-1)  # [B, T, N, D+2d]
-            x_his = torch.cat([x_his, node_emb, time_emb], dim=-1)  # [B, T, N, D+2d]
+            # x_his = torch.cat([x_his, node_emb, time_emb], dim=-1)  # [B, T, N, D+2d]
 
         supports_en = self.adj_mx
         init_state = self.encoder.init_hidden(x.shape[0])
@@ -258,13 +259,14 @@ class MDGCRN_NoMem(nn.Module):
         h_t = h_en[:, -1, :, :]  # B, N, hidden (last state)
 
         # for x_his
-        h_his_en, state_his_en = self.encoder(
-            x_his, init_state, supports_en
-        )  # B, T, N, hidden
-        h_his_t = h_his_en[:, -1, :, :]  # B, N, hidden (last state)
+        # h_his_en, state_his_en = self.encoder(
+        #     x_his, init_state, supports_en
+        # )  # B, T, N, hidden
+        # h_his_t = h_his_en[:, -1, :, :]  # B, N, hidden (last state)
 
         h_de = h_t
-        h_aug = torch.cat([h_t, h_his_t], dim=-1)  # B, N, D
+        # h_aug = torch.cat([h_t, h_his_t], dim=-1)  # B, N, D
+        h_aug = h_t
 
         node_embeddings = self.hypernet(h_aug)  # B, N, e
         support = torch.softmax(
@@ -297,7 +299,7 @@ class MDGCRN_NoMem(nn.Module):
 
         output = torch.stack(out, dim=1)
 
-        return output, h_t, h_his_t
+        return output, None, None
 
 
 if __name__ == "__main__":
@@ -306,7 +308,7 @@ if __name__ == "__main__":
 
     adj_mx = load_adj("../METRLA/adj_mx.pkl", "symadj")
     adj_mx = [torch.FloatTensor(i) for i in adj_mx]
-    model = MDGCRN_NoMem(adj_mx=adj_mx)
+    model = MDGCRN_woSSDL(adj_mx=adj_mx, use_STE=True)
     summary(
         model,
         [[8, 12, 207, 1], [8, 12, 207, 1], [8, 12, 207, 1], [8, 12, 207, 1]],

@@ -15,45 +15,57 @@ from utils import (
     masked_rmse_loss,
 )
 from utils import load_adj
-from model_MDGCRN.MDGCRN_woSSDL import MDGCRN_woSSDL
+from MDGCRN_woSSDL import MDGCRN_woSSDL
+
 
 def print_model_params(model):
     param_count = 0
     for name, param in model.named_parameters():
         if param.requires_grad:
-            print("%-40s\t%-30s\t%-30s" % (name, list(param.shape), param.numel()), flush=True)
+            print(
+                "%-40s\t%-30s\t%-30s" % (name, list(param.shape), param.numel()),
+                flush=True,
+            )
             param_count += param.numel()
     print("%-40s\t%-30s" % ("Total trainable params", param_count), flush=True)
 
 
-class ContrastiveLoss:
-    def __init__(self, contra_loss="triplet", mask=None, temp=1.0, margin=0.5):
-        self.contra_loss = contra_loss
-        self.mask = mask
-        self.temp = temp
-        self.margin = margin
+def calculate_sim(input, input_his, method="cos"):
+    if method == "cos":
+        score = torch.cosine_similarity(input, input_his, dim=-1)  # B, N
+    else:
+        score = torch.sum(torch.abs(input - input_his), dim=-1)
+    return score
 
-        self.triplet = nn.TripletMarginLoss(margin=self.margin)
 
-    def calculate(self, query, pos, neg, mask):
-        """
-        :param query: shape (batch_size, num_sensor, hidden_dim)
-        :param pos: shape (batch_size, num_sensor, hidden_dim)
-        :param neg: shape (batch_size, num_sensor, hidden_dim) or (batch_size, num_sensor, num_memory, hidden_dim)
-        :param mask: shape (batch_size, num_sensor, num_memory) True means positives
-        """
-        if self.contra_loss == "triplet":
-            return self.triplet(query, pos.detach(), neg.detach())
-        elif self.contra_loss == "infonce":
-            # print(query.shape, pos.shape, neg.shape)
-            score_matrix = torch.cosine_similarity(
-                query.unsqueeze(-2), neg, dim=-1
-            )  # (B, N, M)
-            score_matrix = torch.exp(score_matrix / self.temp)
-            pos_sum = torch.sum(score_matrix * mask, dim=-1)
-            ratio = pos_sum / torch.sum(score_matrix, dim=-1)
-            u_loss = torch.mean(-torch.log(ratio))
-            return u_loss
+# class ContrastiveLoss:
+#     def __init__(self, contra_loss="triplet", mask=None, temp=1.0, margin=0.5):
+#         self.contra_loss = contra_loss
+#         self.mask = mask
+#         self.temp = temp
+#         self.margin = margin
+
+#         self.triplet = nn.TripletMarginLoss(margin=self.margin)
+
+#     def calculate(self, query, pos, neg, mask):
+#         """
+#         :param query: shape (batch_size, num_sensor, hidden_dim)
+#         :param pos: shape (batch_size, num_sensor, hidden_dim)
+#         :param neg: shape (batch_size, num_sensor, hidden_dim) or (batch_size, num_sensor, num_memory, hidden_dim)
+#         :param mask: shape (batch_size, num_sensor, num_memory) True means positives
+#         """
+#         if self.contra_loss == "triplet":
+#             return self.triplet(query, pos.detach(), neg.detach())
+#         elif self.contra_loss == "infonce":
+#             # print(query.shape, pos.shape, neg.shape)
+#             score_matrix = torch.cosine_similarity(
+#                 query.unsqueeze(-2), neg, dim=-1
+#             )  # (B, N, M)
+#             score_matrix = torch.exp(score_matrix / self.temp)
+#             pos_sum = torch.sum(score_matrix * mask, dim=-1)
+#             ratio = pos_sum / torch.sum(score_matrix, dim=-1)
+#             u_loss = torch.mean(-torch.log(ratio))
+#             return u_loss
 
 
 def get_model():
@@ -67,15 +79,10 @@ def get_model():
         rnn_units=args.rnn_units,
         rnn_layers=args.rnn_layers,
         cheb_k=args.cheb_k,
-        mem_num=args.mem_num,
-        mem_dim=args.mem_dim,
         embed_dim=args.embed_dim,
         adj_mx=adjs,
         tf_decay_steps=args.tf_decay_steps,
         use_teacher_forcing=args.use_teacher_forcing,
-        contra_loss=args.contra_loss,
-        diff_max=diff_max,
-        diff_min=diff_min,
         use_STE=args.use_STE,
         device=device,
     ).to(device)
@@ -172,20 +179,13 @@ def traintest_model():
         start_time = time.time()
         model = model.train()
         data_iter = data["train_loader"]
-        losses, mae_losses, contra_losses, detect_losses, XQ_losses, XP_losses = (
-            [],
-            [],
-            [],
-            [],
-            [],
-            [],
-        )
+        losses = []
         for x, y in data_iter:
             optimizer.zero_grad()
             x = x.to(device)
             y = y.to(device)
             x, x_cov, x_his, y, y_cov = prepare_x_y(x, y)
-            output, h_att, query, pos, neg, mask, query_simi, pos_simi = model(
+            output, Q_t, Q_his = model(
                 x, x_cov, x_his, y_cov, scaler.transform(y), batches_seen
             )
             y_pred = scaler.inverse_transform(output)
@@ -193,44 +193,9 @@ def traintest_model():
             mae_loss = masked_mae_loss(
                 y_pred, y_true
             )  # masked_mae_loss(y_pred, y_true)
-            separate_loss = ContrastiveLoss(
-                contra_loss=args.contra_loss, mask=mask, temp=args.temp
-            )
-            # when use triplet: mask is None
 
-            loss_c = separate_loss.calculate(query[0], pos[0], neg[0], mask[0])
-            # loss_c += separate_loss.calculate(query[1], pos[1], neg[1], mask[1])
+            loss = mae_loss
 
-            loss_d = nn.functional.l1_loss(query_simi, pos_simi)
-
-            # loss_d = 1 - torch.cosine_similarity(query_simi, pos_simi, dim=-1).mean()
-
-            x_simi = torch.cosine_similarity(x, x_his, dim=1).squeeze()  # BTN1 -> BN
-
-            loss_xq = 1 - torch.cosine_similarity(query_simi, x_simi, dim=-1).mean()
-
-            # 给abnormal case加高权重
-            # loss_xq = ((1 - x_simi) * torch.abs(query_simi - x_simi)).sum(dim=-1).mean()
-
-            # loss_d = ((1 - x_simi) * torch.abs(query_simi - pos_simi)).sum(dim=-1).mean()
-
-            loss_xp = 1 - torch.cosine_similarity(x_simi, pos_simi, dim=-1).mean()
-            # loss_xp = F.l1_loss(x_simi, pos_simi)
-
-            loss = (
-                mae_loss
-                + args.lamb_c * loss_c
-                + args.lamb_d * loss_d
-                + args.lamb_xq * loss_xq
-                + args.lamb_xp * loss_xp
-            )
-
-            losses.append(loss.item())
-            mae_losses.append(mae_loss.item())
-            contra_losses.append(loss_c.item())
-            detect_losses.append(loss_d.item())
-            XQ_losses.append(loss_xq.item())
-            XP_losses.append(loss_xp.item())
             losses.append(loss.item())
 
             batches_seen += 1
@@ -240,24 +205,14 @@ def traintest_model():
             optimizer.step()
 
         train_loss = np.mean(losses)
-        train_mae_loss = np.mean(mae_losses)
-        train_contra_loss = np.mean(contra_losses)
-        train_detect_loss = np.mean(detect_losses)
-        train_XQ_loss = np.mean(XQ_losses)
-        train_XP_loss = np.mean(XP_losses)
 
         lr_scheduler.step()
         val_loss = evaluate(model, "val")
         end_time2 = time.time()
-        message = "Epoch [{}/{}] loss: {:.4f}, mae_loss: {:.4f}, contra_loss: {:.4f}, detect_loss: {:.4f}, XQ_loss: {:.4f}, XP_loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.1f}s".format(
+        message = "Epoch [{}/{}] loss: {:.4f}, val_loss: {:.4f}, lr: {:.6f}, {:.1f}s".format(
             epoch_num + 1,
             args.epochs,
             train_loss,
-            train_mae_loss,
-            train_contra_loss,
-            train_detect_loss,
-            train_XQ_loss,
-            train_XP_loss,
             val_loss,
             optimizer.param_groups[0]["lr"],
             (end_time2 - start_time),
@@ -356,19 +311,6 @@ parser.add_argument("--tf_decay_steps", type=int, default=2000, help="tf_decay_s
 parser.add_argument("--gpu", type=int, default=0, help="which gpu to use")
 parser.add_argument("--seed", type=int, default=100, help="random seed.")
 parser.add_argument("--temp", type=float, default=1.0, help="temperature parameter")
-parser.add_argument("--lamb_c", type=float, default=0.1, help="contra loss lambda")
-parser.add_argument(
-    "--lamb_d", type=float, default=1.0, help="anomaly detection loss lambda"
-)
-parser.add_argument("--lamb_xq", type=float, default=1.0, help="X-Q loss lambda")
-parser.add_argument("--lamb_xp", type=float, default=1.0, help="X-P loss lambda")
-parser.add_argument(
-    "--contra_loss",
-    type=str,
-    choices=["triplet", "infonce"],
-    default="infonce",
-    help="whether to triplet or infonce contra loss",
-)
 parser.add_argument(
     "--use_STE",
     type=eval,
@@ -392,32 +334,7 @@ if args.dataset == "METRLA":
     args.num_nodes = 207
     args.use_STE = False
 
-    args.seed = 888
-    args.lamb_c = 0.1
-    args.lamb_d = 1
-    args.lamb_xq = 0
-    args.lamb_xp = 0
-
-    args.contra_loss = "triplet"
-
-    # args.rnn_layers=3
-
-    # args.cheb_k=2
-
-    # args.patience=10
-    # args.batch_size=16
-    # args.lr=0.001
-    # args.steps=[50, 100]
-    # args.weight_decay=0
-    # args.max_grad_norm=5
-    # args.rnn_units=128
-    # args.embed_dim=10
-    # args.mem_num=8
-    # args.mem_dim=64
-    # args.cl_decay_steps=6000
-    # args.max_diffusion_step=3
-    # args.lamb_c=0.1
-    # args.lamb_d=2
+    args.seed = 345
 
 elif args.dataset == "PEMSBAY":
     data_path = f"../{args.dataset}/pems-bay.h5"
@@ -427,24 +344,7 @@ elif args.dataset == "PEMSBAY":
     args.cl_decay_steps = 8000
     args.steps = [10, 150]
 
-    args.seed = 666
-    # args.lamb_c=0
-    # args.lamb_d=0
-
-    # args.patience=10
-    # args.batch_size=16
-    # args.lr=0.001
-    # args.steps=[50, 100]
-    # args.weight_decay=0
-    # args.max_grad_norm=5
-    # args.rnn_units=128
-    # args.embed_dim=10
-    # args.mem_num=20
-    # args.mem_dim=64
-    # args.cl_decay_steps=6000
-    # args.max_diffusion_step=3
-    # args.lamb_c=0.1
-    # args.lamb_d=2
+    args.seed = 514
 
 elif args.dataset == "PEMS03":
     data_path = f"../{args.dataset}/{args.dataset}.npz"
@@ -467,8 +367,6 @@ elif args.dataset == "PEMS03":
     args.mem_dim = 64
     args.cl_decay_steps = 6000
     args.max_diffusion_step = 3
-    args.lamb_c = 0.000001
-    args.lamb_d = 2
 
 elif args.dataset == "PEMS04":
     data_path = f"../{args.dataset}/{args.dataset}.npz"
@@ -494,15 +392,13 @@ elif args.dataset == "PEMS04":
     args.mem_dim = 64
     args.cl_decay_steps = 6000
     args.max_diffusion_step = 3
-    args.lamb_c = 0.0001
-    args.lamb_d = 2
 
 elif args.dataset == "PEMS07":
     data_path = f"../{args.dataset}/{args.dataset}.npz"
     adj_mx_path = f"../{args.dataset}/adj_{args.dataset}_distance.pkl"
     args.num_nodes = num_nodes_dict[args.dataset]
 
-    args.patience = 10
+    args.patience = 20
     args.batch_size = 16
     args.lr = 0.001
     args.steps = [50, 100]
@@ -514,8 +410,6 @@ elif args.dataset == "PEMS07":
     args.mem_dim = 64
     args.cl_decay_steps = 6000
     args.max_diffusion_step = 3
-    args.lamb_c = 0.0001
-    args.lamb_d = 2
 
 elif args.dataset == "PEMS08":
     data_path = f"../{args.dataset}/{args.dataset}.npz"
@@ -524,25 +418,7 @@ elif args.dataset == "PEMS08":
     args.steps = [100]
     args.rnn_units = 16  # optimal
 
-    # args.lamb_c=0
-    args.lamb_d = 1.5
-
     args.seed = 999
-
-    # args.patience=10
-    # args.batch_size=16
-    # args.lr=0.001
-    # args.steps=[50, 100]
-    # args.weight_decay=0
-    # args.max_grad_norm=0
-    # args.rnn_units=16
-    # args.embed_dim=16
-    # args.mem_num=20
-    # args.mem_dim=64
-    # args.cl_decay_steps=6000
-    # args.max_diffusion_step=3
-    # args.lamb_c=0.000001
-    # args.lamb_d=2
 
 elif args.dataset == "PEMSD7M":
     data_path = f"../{args.dataset}/{args.dataset}.npz"
@@ -550,26 +426,25 @@ elif args.dataset == "PEMSD7M":
     args.num_nodes = num_nodes_dict[args.dataset]
     # args.use_STE = False
 
-    args.patience = 30
-    args.batch_size = 16
-    args.lr = 0.001
-    args.steps = [50, 100]
-    args.weight_decay = 0
-    args.max_grad_norm = 0
-    args.rnn_units = 32
-    args.embed_dim = 16
-    args.mem_num = 16
-    args.mem_dim = 64
-    args.cl_decay_steps = 4000
-    args.max_diffusion_step = 3
-    args.lamb_c = 0.0001
-    args.lamb_d = 2
+    args.seed=666
+    
+    args.patience=30
+    args.batch_size=16
+    args.lr=0.001
+    args.steps=[50, 100]
+    args.weight_decay=0
+    args.max_grad_norm=0
+    args.rnn_units=32
+    args.embed_dim=16
+    args.mem_num=16
+    args.mem_dim=64
+    args.cl_decay_steps=4000
+    args.max_diffusion_step=3
 
-
-model_name = "MDGCRN_NoMem"
+model_name = "MDGCRN_woSSDL"
 timestring = time.strftime("%Y%m%d%H%M%S", time.localtime())
 path = f"../save/{args.dataset}_{model_name}_{timestring}"
-logging_path = f"{path}/{model_name}_{timestring}_logging.txt"
+logging_path = f"{path}/{model_name}_{timestring}_logging.log"
 modelpt_path = f"{path}/{model_name}_{timestring}.pt"
 if not os.path.exists(path):
     os.makedirs(path)
@@ -639,16 +514,6 @@ for category in ["train", "val", "test"]:
         data["x_" + category][..., 2]
     )  # x_his
 
-# * 既然max都相同, min干脆设置为0, 因为abs的最小值必定>=0, 这样同样能合理解释, 也能归一化到[0, 1],只不过最小值为0.07左右, 与0接近
-diff_max = np.max(
-    np.abs(
-        scaler.transform(data["x_train"][..., 0])
-        - scaler.transform(data["x_train"][..., -1])
-    )
-)  # 3.734067777528973 for x_train, x_val, and x_test
-# diff_min = np.min(np.abs(scaler.transform(data['x_train'][..., 0]) - scaler.transform(data['x_train'][..., -1])))  # x_train: 0.34289610787771085, x_val: 0.37793285841246993, x_test: 0.2914432740946036
-diff_min = 0.0
-
 data["train_loader"] = torch.utils.data.DataLoader(
     torch.utils.data.TensorDataset(
         torch.FloatTensor(data["x_train"]), torch.FloatTensor(data["y_train"])
@@ -671,9 +536,12 @@ data["test_loader"] = torch.utils.data.DataLoader(
     shuffle=False,
 )
 
+
 def main():
     logger.info(args.dataset, "training and testing started", time.ctime())
-    logger.info("train xs.shape, ys.shape", data["x_train"].shape, data["y_train"].shape)
+    logger.info(
+        "train xs.shape, ys.shape", data["x_train"].shape, data["y_train"].shape
+    )
     logger.info("val xs.shape, ys.shape", data["x_val"].shape, data["y_val"].shape)
     logger.info("test xs.shape, ys.shape", data["x_test"].shape, data["y_test"].shape)
     traintest_model()

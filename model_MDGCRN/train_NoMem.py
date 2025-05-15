@@ -350,26 +350,8 @@ if args.dataset == "METRLA":
     args.num_nodes = 207
     args.use_STE = False
 
-    args.seed = 888
+    args.seed = 345
     args.lamb_xq = 1
-
-    # args.rnn_layers=3
-    args.cheb_k = 3
-
-    # args.patience=10
-    # args.batch_size=16
-    # args.lr=0.001
-    # args.steps=[50, 100]
-    # args.weight_decay=0
-    # args.max_grad_norm=5
-    # args.rnn_units=128
-    # args.embed_dim=10
-    # args.mem_num=8
-    # args.mem_dim=64
-    # args.cl_decay_steps=6000
-    # args.max_diffusion_step=3
-    # args.lamb_c=0.1
-    # args.lamb_d=2
 
 elif args.dataset == "PEMSBAY":
     data_path = f"../{args.dataset}/pems-bay.h5"
@@ -379,24 +361,7 @@ elif args.dataset == "PEMSBAY":
     args.cl_decay_steps = 8000
     args.steps = [10, 150]
 
-    args.seed = 666
-    # args.lamb_c=0
-    # args.lamb_d=0
-
-    # args.patience=10
-    # args.batch_size=16
-    # args.lr=0.001
-    # args.steps=[50, 100]
-    # args.weight_decay=0
-    # args.max_grad_norm=5
-    # args.rnn_units=128
-    # args.embed_dim=10
-    # args.mem_num=20
-    # args.mem_dim=64
-    # args.cl_decay_steps=6000
-    # args.max_diffusion_step=3
-    # args.lamb_c=0.1
-    # args.lamb_d=2
+    args.seed = 514
 
 elif args.dataset == "PEMS03":
     data_path = f"../{args.dataset}/{args.dataset}.npz"
@@ -419,8 +384,6 @@ elif args.dataset == "PEMS03":
     args.mem_dim = 64
     args.cl_decay_steps = 6000
     args.max_diffusion_step = 3
-    args.lamb_c = 0.000001
-    args.lamb_d = 2
 
 elif args.dataset == "PEMS04":
     data_path = f"../{args.dataset}/{args.dataset}.npz"
@@ -446,15 +409,13 @@ elif args.dataset == "PEMS04":
     args.mem_dim = 64
     args.cl_decay_steps = 6000
     args.max_diffusion_step = 3
-    args.lamb_c = 0.0001
-    args.lamb_d = 2
 
 elif args.dataset == "PEMS07":
     data_path = f"../{args.dataset}/{args.dataset}.npz"
     adj_mx_path = f"../{args.dataset}/adj_{args.dataset}_distance.pkl"
     args.num_nodes = num_nodes_dict[args.dataset]
 
-    args.patience = 10
+    args.patience = 20
     args.batch_size = 16
     args.lr = 0.001
     args.steps = [50, 100]
@@ -466,8 +427,6 @@ elif args.dataset == "PEMS07":
     args.mem_dim = 64
     args.cl_decay_steps = 6000
     args.max_diffusion_step = 3
-    args.lamb_c = 0.0001
-    args.lamb_d = 2
 
 elif args.dataset == "PEMS08":
     data_path = f"../{args.dataset}/{args.dataset}.npz"
@@ -476,31 +435,15 @@ elif args.dataset == "PEMS08":
     args.steps = [100]
     args.rnn_units = 16  # optimal
 
-    # args.lamb_c=0
-    args.lamb_d = 1.5
-
     args.seed = 999
-
-    # args.patience=10
-    # args.batch_size=16
-    # args.lr=0.001
-    # args.steps=[50, 100]
-    # args.weight_decay=0
-    # args.max_grad_norm=0
-    # args.rnn_units=16
-    # args.embed_dim=16
-    # args.mem_num=20
-    # args.mem_dim=64
-    # args.cl_decay_steps=6000
-    # args.max_diffusion_step=3
-    # args.lamb_c=0.000001
-    # args.lamb_d=2
 
 elif args.dataset == "PEMSD7M":
     data_path = f"../{args.dataset}/{args.dataset}.npz"
     adj_mx_path = f"../{args.dataset}/adj_{args.dataset}_distance.pkl"
     args.num_nodes = num_nodes_dict[args.dataset]
     # args.use_STE = False
+    
+    args.seed=666
 
     args.patience = 30
     args.batch_size = 16
@@ -514,8 +457,6 @@ elif args.dataset == "PEMSD7M":
     args.mem_dim = 64
     args.cl_decay_steps = 4000
     args.max_diffusion_step = 3
-    args.lamb_c = 0.0001
-    args.lamb_d = 2
 
 
 model_name = "MDGCRN_NoMem"

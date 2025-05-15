@@ -416,13 +416,13 @@ elif args.dataset == 'PEMSBAY':
     args.cl_decay_steps = 8000
     args.steps = [10, 150]
     
-    args.seed=666
+    args.seed=514
     
     args.contra_loss="triplet"
     args.margin_newD=5
     
-    args.lamb_c=0.00001
-    args.lamb_d=1
+    args.lamb_c=0
+    args.lamb_d=0
     # args.use_curriculum_learning=False
     
     # args.patience=50
